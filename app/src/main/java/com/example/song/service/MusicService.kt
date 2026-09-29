@@ -513,6 +513,7 @@ class MusicService : MediaSessionService() {
 
                 if (query != null && (!resolvedCache.containsKey(query) || resolvedCache[query]?.isExpired() == true)) {
                     try {
+                        delay((1500L..3500L).random())
                         val resolved = performResolution(query, artUrl ?: "", isPriority = false)
                         if (resolved != null && isActive) {
                             resolvedCache[query] = resolved

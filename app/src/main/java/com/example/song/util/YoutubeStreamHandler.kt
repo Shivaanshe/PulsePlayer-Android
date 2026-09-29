@@ -58,7 +58,7 @@ object YoutubeStreamHandler {
             val request = YoutubeDLRequest(sanitizedUrl).apply {
                 addOption("--no-check-certificate")
                 addOption("--rm-cache-dir") 
-                addOption("--extractor-args", "youtube:player_client=android,mweb;web:visitor_data=random")
+                addOption("--extractor-args", "youtube:player_client=android,mweb")
                 addOption("--socket-timeout", "15")
                 
                 if (isPlaylist) {
@@ -216,7 +216,7 @@ object YoutubeStreamHandler {
                 if (isProcessCancelled(processId)) {
                     throw CancellationException("Process $processId was preempted")
                 }
-                delay(300)
+                delay((attempts * 2000L) + (500L..1500L).random())
             }
         }
         null
@@ -265,7 +265,7 @@ object YoutubeStreamHandler {
                         val request = YoutubeDLRequest(actualUrl).apply {
                             addOption("-f", "bestaudio/ba/b")
                             addOption("--dump-json")
-                            addOption("--extractor-args", "youtube:player_client=$clients;web:visitor_data=random")
+                            addOption("--extractor-args", "youtube:player_client=$clients")
                             addOption("--no-check-certificate")
                             addOption("--force-ipv4")
                             addOption("--socket-timeout", "15")
@@ -317,7 +317,7 @@ object YoutubeStreamHandler {
                         if (isProcessCancelled(processId)) {
                             throw CancellationException("Process $processId was preempted")
                         }
-                        delay(300)
+                        delay((attempts * 2000L) + (500L..1500L).random())
                     }
                 }
             }
