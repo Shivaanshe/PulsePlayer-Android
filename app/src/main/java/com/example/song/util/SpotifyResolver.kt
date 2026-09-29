@@ -56,8 +56,9 @@ object SpotifyResolver {
                 .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36")
                 .build()
 
-            val response = client.newCall(request).execute()
-            val html = response.body?.string() ?: ""
+            val html = client.newCall(request).execute().use { response ->
+                response.body?.string() ?: ""
+            }
 
             // Strategy A: JSON Extraction (__NEXT_DATA__)
             val jsonPattern = Pattern.compile("<script id=\"__NEXT_DATA__\" type=\"application/json\">(.*?)</script>")

@@ -23,6 +23,7 @@ import java.io.File
 import java.net.URL
 import java.util.UUID
 import android.util.Log
+import com.example.song.SongApplication
 import com.example.song.util.YoutubeStreamHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,7 @@ class SongRepository(
     private val iTunesService: ITunesService by lazy {
         Retrofit.Builder()
             .baseUrl("https://itunes.apple.com/")
+            .client(SongApplication.getInstance().okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(ITunesService::class.java)
@@ -46,6 +48,7 @@ class SongRepository(
     private val spotifyService: SpotifyService by lazy {
         Retrofit.Builder()
             .baseUrl("https://open.spotify.com/")
+            .client(SongApplication.getInstance().okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(SpotifyService::class.java)
