@@ -230,7 +230,12 @@ object YoutubeStreamHandler {
                 throw CancellationException("Process $processId was preempted")
             }
 
-            val isSearch = youtubeUrl.contains("ytsearch1:") || youtubeUrl.startsWith("pulse_placeholder:")
+            val isDirectUrl = youtubeUrl.startsWith("http://", ignoreCase = true) || 
+                              youtubeUrl.startsWith("https://", ignoreCase = true) || 
+                              youtubeUrl.contains("youtube.com", ignoreCase = true) || 
+                              youtubeUrl.contains("youtu.be", ignoreCase = true)
+
+            val isSearch = !isDirectUrl || youtubeUrl.contains("ytsearch1:") || youtubeUrl.startsWith("pulse_placeholder:")
             
             val actualUrl = if (isSearch) {
                 val videoId = resolveSearchToId(youtubeUrl, processId)
