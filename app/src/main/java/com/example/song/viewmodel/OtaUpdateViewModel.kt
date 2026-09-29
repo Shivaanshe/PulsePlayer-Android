@@ -71,6 +71,7 @@ class OtaUpdateViewModel(
 
     private var progressPollingJob: Job? = null
     private var downloadedFile: File? = null
+    private var corruptRetryCount = 0
 
     // Persisted in SavedStateHandle so it survives process death when user goes to Settings
     private var isWaitingForInstallPermission: Boolean
@@ -149,6 +150,7 @@ class OtaUpdateViewModel(
     }
 
     fun startDownloadOrInstall() {
+        corruptRetryCount = 0
         val release = _activeRelease.value ?: return
         val asset = _activeAsset.value ?: return
 
@@ -242,12 +244,20 @@ class OtaUpdateViewModel(
         if (otaManager.canInstallPackages()) {
             when (val result = otaManager.installApk(targetFile)) {
                 InstallResult.Success -> {
+                    corruptRetryCount = 0
                     Log.d(TAG, "Package installer launched successfully.")
                 }
                 InstallResult.CorruptFile -> {
-                    _toastMessage.value = "Downloaded update was incomplete or corrupt. Re-downloading..."
-                    downloadedFile = null
-                    startDownloadForce()
+                    if (corruptRetryCount < 1) {
+                        corruptRetryCount++
+                        _toastMessage.value = "Downloaded update was incomplete. Re-downloading (Attempt $corruptRetryCount)..."
+                        downloadedFile = null
+                        startDownloadForce()
+                    } else {
+                        corruptRetryCount = 0
+                        downloadedFile = null
+                        _toastMessage.value = "Update failed repeatedly. Please free up at least 500MB of storage and try again."
+                    }
                 }
                 InstallResult.PermissionOrSecurityBlocked -> {
                     _toastMessage.value = "Please enable 'Install Unknown Apps' in Settings to update."
