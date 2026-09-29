@@ -255,7 +255,7 @@ class SongRepository(
     fun cancelDownload() {
         currentRequestId?.let { 
             try {
-                YoutubeDL.getInstance().destroyProcessById(it)
+                YoutubeStreamHandler.cancelProcess(it)
             } catch (e: Exception) {
                 e.printStackTrace()
             }

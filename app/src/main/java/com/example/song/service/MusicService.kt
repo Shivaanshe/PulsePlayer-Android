@@ -52,6 +52,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.sync.withLock
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.UUID
@@ -124,7 +125,11 @@ class MusicService : MediaSessionService() {
                     
                     if (uriStr.contains("pulse.music/resolve")) {
                         val mediaId = dataSpec.uri.pathSegments.lastOrNull() ?: "unknown"
-                        val query = dataSpec.uri.getQueryParameter("query") ?: return dataSpec
+                        val query = dataSpec.uri.getQueryParameter("query")
+                        if (query.isNullOrBlank()) {
+                            PulseLogger.log("JIT Resolution aborted: Query parameter missing or blank in $uriStr", isError = true)
+                            throw IOException("Invalid stream resolution query for Media ID: $mediaId")
+                        }
                         val artworkUrl = dataSpec.uri.getQueryParameter("artwork_url") ?: ""
                         
                         val cached = resolvedCache[query]
@@ -139,23 +144,28 @@ class MusicService : MediaSessionService() {
 
                         PulseLogger.log("JIT Resolution started for: $query")
                         
-                        return runBlocking(Dispatchers.IO) { 
-                            val resolved = performResolution(query, artworkUrl, isPriority = true)
-                            if (resolved != null) {
-                                resolvedCache[query] = resolved
-                                withContext(Dispatchers.Main) {
-                                    updateActiveMetadata(query, resolved.artwork)
-                                }
+                        return try {
+                            runBlocking(Dispatchers.IO) { 
+                                val resolved = performResolution(query, artworkUrl, isPriority = true)
+                                if (resolved != null) {
+                                    resolvedCache[query] = resolved
+                                    withContext(Dispatchers.Main) {
+                                        updateActiveMetadata(query, resolved.artwork)
+                                    }
 
-                                dataSpec.buildUpon()
-                                    .setUri(Uri.parse(resolved.url))
-                                    .setHttpRequestHeaders(resolved.headers)
-                                    .setKey(mediaId)
-                                    .build()
-                            } else {
-                                PulseLogger.log("JIT Resolution FAILED for: $query", isError = true)
-                                dataSpec
+                                    dataSpec.buildUpon()
+                                        .setUri(Uri.parse(resolved.url))
+                                        .setHttpRequestHeaders(resolved.headers)
+                                        .setKey(mediaId)
+                                        .build()
+                                } else {
+                                    PulseLogger.log("JIT Resolution FAILED for: $query", isError = true)
+                                    throw IOException("JIT stream resolution failed for query: $query")
+                                }
                             }
+                        } catch (_: CancellationException) {
+                            PulseLogger.log("JIT Resolution preempted. Deferring to next access.")
+                            dataSpec
                         }
                     }
                     return dataSpec
@@ -417,6 +427,11 @@ class MusicService : MediaSessionService() {
     }
 
     private suspend fun performResolution(query: String, artworkUrl: String, isPriority: Boolean): ResolvedData? = withContext(Dispatchers.IO) {
+        if (query.isBlank()) {
+            PulseLogger.log("Aborting JIT resolution: query is blank", isError = true)
+            return@withContext null
+        }
+
         val processId = UUID.randomUUID().toString()
         val isLocalFile = query.startsWith("/") || query.startsWith("file://") || File(query).exists()
         
@@ -428,7 +443,7 @@ class MusicService : MediaSessionService() {
         if (isPriority) {
             currentBackgroundProcessId?.let { bgProcId ->
                 try {
-                    YoutubeDL.getInstance().destroyProcessById(bgProcId)
+                    YoutubeStreamHandler.cancelProcess(bgProcId)
                     PulseLogger.log("Preempted background JIT pre-resolution for priority request.")
                 } catch (_: Exception) {}
             }
@@ -455,11 +470,16 @@ class MusicService : MediaSessionService() {
                     null
                 }
             }
-        } catch (_: Exception) { null } finally {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        } finally {
             if (!isPriority && currentBackgroundProcessId == processId) {
                 currentBackgroundProcessId = null
             }
-            com.yausername.youtubedl_android.YoutubeDL.getInstance().destroyProcessById(processId)
+            YoutubeStreamHandler.cancelProcess(processId)
+            YoutubeStreamHandler.clearProcessCancellation(processId)
             activeJobs.remove(query)
             job.cancel()
         }
@@ -492,12 +512,19 @@ class MusicService : MediaSessionService() {
                 val artUrl = item.localConfiguration?.uri?.getQueryParameter("artwork_url")
 
                 if (query != null && (!resolvedCache.containsKey(query) || resolvedCache[query]?.isExpired() == true)) {
-                    val resolved = performResolution(query, artUrl ?: "", isPriority = false)
-                    if (resolved != null && isActive) {
-                        resolvedCache[query] = resolved
-                        withContext(Dispatchers.Main) {
-                            updateMetadataInQueue(i, item.mediaId, resolved.artwork)
+                    try {
+                        val resolved = performResolution(query, artUrl ?: "", isPriority = false)
+                        if (resolved != null && isActive) {
+                            resolvedCache[query] = resolved
+                            withContext(Dispatchers.Main) {
+                                updateMetadataInQueue(i, item.mediaId, resolved.artwork)
+                            }
                         }
+                    } catch (_: CancellationException) {
+                        PulseLogger.log("Background pre-resolution preempted for query: $query")
+                        break
+                    } catch (e: Exception) {
+                        PulseLogger.log("Background pre-resolution failed for query: $query", isError = true)
                     }
                 }
             }
@@ -765,16 +792,7 @@ class MusicService : MediaSessionService() {
 
                         val mediaItems = songs.map { mapSongToMediaItem(it) }
                         withContext(Dispatchers.Main) {
-                            val safeIndex = index.coerceIn(0, mediaItems.size - 1)
-                            val currentItem = player.currentMediaItem
-                            val targetItem = mediaItems[safeIndex]
-
-                            if (currentItem != null && currentItem.mediaId == targetItem.mediaId) {
-                                player.setMediaItems(mediaItems, safeIndex, position)
-                            } else {
-                                player.setMediaItems(mediaItems, safeIndex, position)
-                                if (isPlaying) player.play()
-                            }
+                            syncPlayerPlaylist(player, mediaItems, index, position, isPlaying)
                             preResolveNextItems()
                         }
                     }
@@ -810,8 +828,11 @@ class MusicService : MediaSessionService() {
 
     private fun mapSongToMediaItem(song: Song): MediaItem {
         val isLocal = song.audioUri.startsWith("/") || song.audioUri.startsWith("file://")
+        val searchQuery = song.audioUri.ifBlank {
+            "${song.title} ${song.artist}".trim().ifBlank { song.audioUri }
+        }
         val uri = if (isLocal) Uri.fromFile(File(song.audioUri)) else {
-            val encodedQuery = Uri.encode(song.audioUri)
+            val encodedQuery = Uri.encode(searchQuery)
             val encodedArt = Uri.encode(song.imageUrl ?: "")
             Uri.parse("https://pulse.music/resolve/${song.id}?query=$encodedQuery&artwork_url=$encodedArt")
         }
@@ -822,7 +843,7 @@ class MusicService : MediaSessionService() {
             .setArtworkUri(song.imageUrl?.let { Uri.parse(it) })
             .setExtras(Bundle().apply { 
                 putString("custom_artwork_url", song.imageUrl)
-                putString("search_query", song.audioUri)
+                putString("search_query", searchQuery)
             })
             .build()
         
@@ -832,6 +853,65 @@ class MusicService : MediaSessionService() {
             .setCustomCacheKey(song.id.toString()) 
             .setMediaMetadata(metadata)
             .build()
+    }
+
+    private fun syncPlayerPlaylist(
+        player: Player,
+        mediaItems: List<MediaItem>,
+        targetIndex: Int,
+        position: Long,
+        isPlaying: Boolean
+    ) {
+        if (mediaItems.isEmpty()) {
+            player.clearMediaItems()
+            return
+        }
+
+        val safeIndex = targetIndex.coerceIn(0, mediaItems.size - 1)
+        val currentItem = player.currentMediaItem
+        val targetItem = mediaItems[safeIndex]
+        val currentIndex = player.currentMediaItemIndex
+
+        if (currentItem != null && currentItem.mediaId == targetItem.mediaId && player.playbackState != Player.STATE_IDLE) {
+            // 🛡️ SEAMLESS QUEUE SYNC: Current playing song is unchanged!
+            // Do NOT call player.setMediaItems(...) because it tears down the active decoder & resets playback.
+            // Incrementally update items after and before currentMediaItemIndex.
+
+            // 1. Sync items after current track
+            val currentCountAfter = player.mediaItemCount - (currentIndex + 1)
+            if (currentCountAfter > 0) {
+                player.removeMediaItems(currentIndex + 1, player.mediaItemCount)
+            }
+            val targetItemsAfter = if (safeIndex + 1 < mediaItems.size) {
+                mediaItems.subList(safeIndex + 1, mediaItems.size)
+            } else {
+                emptyList()
+            }
+            if (targetItemsAfter.isNotEmpty()) {
+                player.addMediaItems(currentIndex + 1, targetItemsAfter)
+            }
+
+            // 2. Sync items before current track
+            val existingBefore = mutableListOf<String>()
+            for (i in 0 until currentIndex) {
+                existingBefore.add(player.getMediaItemAt(i).mediaId)
+            }
+            val targetBefore = mediaItems.subList(0, safeIndex).map { it.mediaId }
+
+            if (existingBefore != targetBefore) {
+                for (i in 0 until currentIndex) {
+                    player.removeMediaItem(0)
+                }
+                val targetItemsBefore = mediaItems.subList(0, safeIndex)
+                if (targetItemsBefore.isNotEmpty()) {
+                    player.addMediaItems(0, targetItemsBefore)
+                }
+            }
+        } else {
+            // New song selected or player idle: full reload needed
+            player.setMediaItems(mediaItems, safeIndex, position)
+            if (isPlaying) player.play()
+        }
     }
 
     private suspend fun fetchImageAsByteArray(url: String?): ByteArray? {
