@@ -30,6 +30,14 @@ sealed class UpdateCheckResult {
     object Throttled : UpdateCheckResult()
 }
 
+sealed interface InstallResult {
+    object Success : InstallResult
+    object CorruptFile : InstallResult
+    object PermissionOrSecurityBlocked : InstallResult
+    object InstallerNotFound : InstallResult
+    data class Error(val message: String) : InstallResult
+}
+
 data class DownloadProgress(
     val downloadId: Long,
     val status: Int, // DownloadManager.STATUS_*
@@ -152,7 +160,16 @@ class OtaUpdateManager(
                     targetFile.delete()
                     return null
                 }
-                Log.d(TAG, "Found valid complete cached APK file ($localSize bytes) at ${targetFile.absolutePath}")
+
+                // Verify package archive integrity
+                val archiveInfo = context.packageManager.getPackageArchiveInfo(targetFile.absolutePath, 0)
+                if (archiveInfo == null || archiveInfo.packageName.isNullOrBlank()) {
+                    Log.w(TAG, "APK package archive integrity check failed for ${targetFile.absolutePath}! Deleting corrupt file.")
+                    targetFile.delete()
+                    return null
+                }
+
+                Log.d(TAG, "Found valid complete cached APK file ($localSize bytes) for ${archiveInfo.packageName} at ${targetFile.absolutePath}")
                 return targetFile
             } else {
                 Log.w(TAG, "Empty APK file found ($localSize bytes). Deleting.")
@@ -174,8 +191,8 @@ class OtaUpdateManager(
             downloadsDir.mkdirs()
         }
 
-        // Low Storage Space Check: Verify usable space >= asset.size + 10MB safety margin
-        val requiredSpace = if (asset.size > 0) asset.size + (10 * 1024 * 1024L) else 250 * 1024 * 1024L
+        // Low Storage Space Check: Verify usable space >= asset.size + 10MB safety margin (or 250MB fallback)
+        val requiredSpace = if (asset.size > 0) asset.size + (10 * 1024 * 1024L) else 350 * 1024 * 1024L
         val usableSpace = downloadsDir.usableSpace
         if (usableSpace < requiredSpace) {
             val reqMb = requiredSpace / (1024 * 1024)
@@ -294,10 +311,18 @@ class OtaUpdateManager(
     /**
      * Dispatches the downloaded APK to the system package installer via FileProvider.
      */
-    fun installApk(apkFile: File): Boolean {
+    fun installApk(apkFile: File): InstallResult {
         if (!apkFile.exists() || apkFile.length() == 0L) {
             Log.e(TAG, "APK file does not exist or is empty: ${apkFile.absolutePath}")
-            return false
+            return InstallResult.CorruptFile
+        }
+
+        // Verify package archive integrity before attempting installation
+        val archiveInfo = context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, 0)
+        if (archiveInfo == null || archiveInfo.packageName.isNullOrBlank()) {
+            Log.e(TAG, "APK archive integrity check failed for ${apkFile.absolutePath}! Package is truncated or corrupt. Deleting corrupt file.")
+            try { apkFile.delete() } catch (e: Exception) {}
+            return InstallResult.CorruptFile
         }
 
         try {
@@ -315,16 +340,18 @@ class OtaUpdateManager(
 
             Log.d(TAG, "Launching package installer intent for $apkUri")
             context.startActivity(installIntent)
-            return true
+            return InstallResult.Success
         } catch (e: ActivityNotFoundException) {
             Log.e(TAG, "No activity found on system to handle package installation intent", e)
-            return false
+            try { apkFile.delete() } catch (cleanupErr: Exception) {}
+            return InstallResult.InstallerNotFound
         } catch (e: SecurityException) {
             Log.e(TAG, "SecurityException launching package installer (OS background restriction)", e)
-            return false
+            return InstallResult.PermissionOrSecurityBlocked
         } catch (e: Exception) {
             Log.e(TAG, "Failed to launch package installer", e)
-            return false
+            try { apkFile.delete() } catch (cleanupErr: Exception) {}
+            return InstallResult.Error(e.message ?: "Installation failed")
         }
     }
 

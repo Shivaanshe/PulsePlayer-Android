@@ -15,6 +15,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.song.data.api.GitHubAsset
 import com.example.song.data.api.GitHubRelease
 import com.example.song.data.ota.DownloadProgress
+import com.example.song.data.ota.InstallResult
 import com.example.song.data.ota.OtaUpdateManager
 import com.example.song.data.ota.UpdateCheckResult
 import kotlinx.coroutines.Job
@@ -234,17 +235,34 @@ class OtaUpdateViewModel(
     fun triggerInstallFlow(apkFile: File? = downloadedFile) {
         val targetFile = apkFile ?: downloadedFile
         if (targetFile == null || !targetFile.exists()) {
-            _toastMessage.value = "APK file not found for installation"
+            _toastMessage.value = "APK file not found for installation."
             return
         }
 
         if (otaManager.canInstallPackages()) {
-            val launched = otaManager.installApk(targetFile)
-            if (!launched) {
-                _toastMessage.value = "Installer launch blocked. Please tap the downloaded APK in your device's Downloads folder to install."
+            when (val result = otaManager.installApk(targetFile)) {
+                InstallResult.Success -> {
+                    Log.d(TAG, "Package installer launched successfully.")
+                }
+                InstallResult.CorruptFile -> {
+                    _toastMessage.value = "Downloaded update was incomplete or corrupt. Re-downloading..."
+                    downloadedFile = null
+                    startDownloadForce()
+                }
+                InstallResult.PermissionOrSecurityBlocked -> {
+                    _toastMessage.value = "Please enable 'Install Unknown Apps' in Settings to update."
+                    _showPermissionModal.value = true
+                }
+                InstallResult.InstallerNotFound -> {
+                    _toastMessage.value = "No system package installer found on this device."
+                }
+                is InstallResult.Error -> {
+                    _toastMessage.value = "Installation failed: ${result.message}"
+                }
             }
         } else {
             // Prompt user to grant "Install Unknown Apps" permission
+            _toastMessage.value = "Please enable 'Install Unknown Apps' in Settings to update."
             _showPermissionModal.value = true
         }
     }
