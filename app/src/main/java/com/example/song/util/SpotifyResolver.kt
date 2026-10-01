@@ -13,7 +13,7 @@ import java.util.regex.Pattern
 
 object SpotifyResolver {
     private const val TAG = "SpotifyResolver"
-    
+
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
@@ -30,7 +30,7 @@ object SpotifyResolver {
 
     suspend fun resolve(url: String, repository: SongRepository): List<StreamingItem> = withContext(Dispatchers.IO) {
         val isSingleTrack = url.contains("/track/")
-        
+
         // Layer 1: Fetch clean metadata from Spotify API first
         val apiMeta = try {
             PulseLogger.updateTask("Fetching Spotify Meta...")
@@ -63,36 +63,36 @@ object SpotifyResolver {
             // Strategy A: JSON Extraction (__NEXT_DATA__)
             val jsonPattern = Pattern.compile("<script id=\"__NEXT_DATA__\" type=\"application/json\">(.*?)</script>")
             val jsonMatcher = jsonPattern.matcher(html)
-            
+
             if (jsonMatcher.find()) {
                 try {
                     val jsonStr = jsonMatcher.group(1) ?: ""
                     val fullJson = JSONObject(jsonStr)
-                    
+
                     val pageProps = fullJson.optJSONObject("props")?.optJSONObject("pageProps")
                     val entity = pageProps?.optJSONObject("state")?.optJSONObject("data")?.optJSONObject("entity")
-                    
+
                     if (entity != null) {
                         val collectionTitle = unescapeHtml(apiMeta?.title ?: entity.optString("title", "Spotify Collection"))
                         val collectionThumb = apiMeta?.thumbnailUrl ?: extractSpotifyImage(entity) ?: ""
-                        
+
                         val tracks = mutableListOf<StreamingItem>()
                         val trackList = entity.optJSONArray("trackList")
-                        
+
                         if (trackList != null) {
                             for (i in 0 until trackList.length()) {
                                 val trackJson = trackList.getJSONObject(i)
                                 val trackTitle = unescapeHtml(trackJson.optString("title"))
-                                val trackArtist = unescapeHtml(trackJson.optString("subtitle").ifEmpty { 
-                                    trackJson.optString("artist").ifEmpty { apiMeta?.artist ?: "Unknown Artist" } 
+                                val trackArtist = unescapeHtml(trackJson.optString("subtitle").ifEmpty {
+                                    trackJson.optString("artist").ifEmpty { apiMeta?.artist ?: "Unknown Artist" }
                                 })
-                                
+
                                 if (trackTitle.isNotEmpty()) {
                                     var trackThumb = extractSpotifyImage(trackJson)
                                     if (trackThumb == null || trackThumb.contains("spotifycdn.com/embed")) {
                                         trackThumb = repository.fetchArtwork(trackTitle, trackArtist)
                                     }
-                                    
+
                                     tracks.add(StreamingItem(
                                         youtubeUrl = "ytsearch1:$trackTitle $trackArtist",
                                         title = trackTitle,
@@ -106,7 +106,7 @@ object SpotifyResolver {
                             }
                         } else if (isSingleTrack) {
                             var trackTitle = unescapeHtml(apiMeta?.title ?: entity.optString("title"))
-                            
+
                             val artistsArray = entity.optJSONArray("artists")
                             val artistFromEntity = if (artistsArray != null && artistsArray.length() > 0) {
                                 val names = mutableListOf<String>()
@@ -115,8 +115,8 @@ object SpotifyResolver {
                                 }
                                 names.joinToString(", ")
                             } else {
-                                entity.optString("subtitle").ifEmpty { 
-                                    entity.optString("artist").ifEmpty { 
+                                entity.optString("subtitle").ifEmpty {
+                                    entity.optString("artist").ifEmpty {
                                         entity.optJSONObject("album")?.optJSONArray("artists")?.optJSONObject(0)?.optString("name") ?: ""
                                     }
                                 }
@@ -133,7 +133,7 @@ object SpotifyResolver {
                                 if (trackThumb == null || (trackThumb.contains("spotifycdn.com/embed"))) {
                                     trackThumb = repository.fetchArtwork(trackTitle, trackArtist)
                                 }
-                                
+
                                 tracks.add(StreamingItem(
                                     youtubeUrl = "ytsearch1:$trackTitle $trackArtist",
                                     title = trackTitle,
@@ -171,14 +171,14 @@ object SpotifyResolver {
             PulseLogger.log("JSON Scrape blocked. Trying OpenGraph fallback...")
             val ogTitlePattern = Pattern.compile("<meta property=\"og:title\" content=\"(.*?)\"")
             val ogDescPattern = Pattern.compile("<meta property=\"og:description\" content=\"(.*?)\"")
-            
+
             val ogTitleMatcher = ogTitlePattern.matcher(html)
             val ogDescMatcher = ogDescPattern.matcher(html)
-            
+
             if (ogTitleMatcher.find()) {
                 val rawTitle = unescapeHtml(ogTitleMatcher.group(1) ?: "")
                 val rawDesc = if (ogDescMatcher.find()) unescapeHtml(ogDescMatcher.group(1) ?: "") else ""
-                
+
                 // Spotify OG description: "Song · Artist · 2024" or "Playlist · 50 songs"
                 val extractedArtist = if (rawDesc.contains(" · ")) {
                     rawDesc.substringBefore(" · ").trim()
@@ -216,7 +216,7 @@ object SpotifyResolver {
         return try {
             val query = "${apiMeta.title} ${apiMeta.artist ?: ""}".trim()
             val results = YoutubeStreamHandler.getMetadata("ytsearch1:$query")
-            results.map { 
+            results.map {
                 if (it.isPlaylist) it.copy(title = apiMeta.title, artist = apiMeta.artist, thumbnailUrl = apiMeta.thumbnailUrl)
                 else it.copy(artist = apiMeta.artist ?: it.artist)
             }
@@ -228,10 +228,10 @@ object SpotifyResolver {
     }
 
     private fun extractSpotifyImage(json: JSONObject): String? {
-        val imgObj = json.optJSONObject("visual") 
-            ?: json.optJSONObject("coverArt") 
+        val imgObj = json.optJSONObject("visual")
+            ?: json.optJSONObject("coverArt")
             ?: json.optJSONObject("artwork")
-        
+
         if (imgObj != null) {
             val sources = imgObj.optJSONArray("sources")
             if (sources != null && sources.length() > 0) {
