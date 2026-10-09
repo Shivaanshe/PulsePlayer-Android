@@ -116,7 +116,19 @@ class SpotifyCrawlPipeline(
         }
     }
 
-    fun prepareCrawl(playlistId: String, initialExpectedCount: Int? = null, title: String? = null) {
+    var resumeFromIndex: Int = 0
+        private set
+
+    fun prepareCrawl(
+        playlistId: String,
+        initialExpectedCount: Int? = null,
+        title: String? = null,
+        isResume: Boolean = false
+    ) {
+        if (consumerJob?.isActive != true) {
+            startConsumer()
+        }
+
         activePlaylistId = playlistId
         expectedCount = initialExpectedCount
 
@@ -128,8 +140,14 @@ class SpotifyCrawlPipeline(
             val now = System.currentTimeMillis()
             activeGeneration = (existing?.crawlGeneration ?: 0) + 1
 
-            // PRD §2.4: Clear stale tracks from previous runs when starting a fresh crawl generation
-            dao.clearTracksForPlaylist(playlistId)
+            if (!isResume) {
+                resumeFromIndex = 0
+                dao.clearTracksForPlaylist(playlistId)
+            } else {
+                val maxIdx = dao.getMaxCapturedIndex(playlistId)
+                resumeFromIndex = maxIdx ?: 0
+                Log.d(TAG, "Resuming crawl for $playlistId from index $resumeFromIndex")
+            }
 
             if (existing != null) {
                 dao.updatePlaylist(
@@ -154,7 +172,10 @@ class SpotifyCrawlPipeline(
                     )
                 )
             }
-            _pipelineState.value = CrawlPipelineStatus.Running(playlistId, 0, initialExpectedCount, CrawlStatus.INITIALIZING)
+            val currentCaptured = if (isResume) dao.getCapturedCount(playlistId) else 0
+            _pipelineState.value = CrawlPipelineStatus.Running(
+                playlistId, currentCaptured, initialExpectedCount ?: existing?.expectedCount, CrawlStatus.INITIALIZING
+            )
         }
     }
 
@@ -215,15 +236,18 @@ class SpotifyCrawlPipeline(
             "BATCH" -> {
                 val tracksArray = jsonObj.getAsJsonArray("tracks") ?: return
                 val validEntities = mutableListOf<PlaylistTrackEntity>()
+                var fallbackCounter = 1
 
                 for (elem in tracksArray) {
                     val obj = elem.asJsonObject
                     val rawIdx = if (obj.has("rowIndex") && !obj.get("rowIndex").isJsonNull) obj.get("rowIndex").asInt else null
                     val rowRaw = if (obj.has("rowRaw") && !obj.get("rowRaw").isJsonNull) obj.get("rowRaw").asInt else null
-                    val calculatedIndex = rawIdx ?: rowRaw ?: continue
+                    var calculatedIndex = rawIdx ?: rowRaw ?: fallbackCounter
+                    if (calculatedIndex < 1) calculatedIndex = fallbackCounter
+                    fallbackCounter = calculatedIndex + 1
 
                     // Index normalization validation (1..10,000)
-                    if (calculatedIndex < 1 || calculatedIndex > 10000) continue
+                    if (calculatedIndex > 10000) continue
 
                     val titleRaw = obj.get("title")?.asString ?: ""
                     val titleClean = sanitizeString(titleRaw, 500)
@@ -297,16 +321,16 @@ class SpotifyCrawlPipeline(
             "FINISHED" -> {
                 val reason = jsonObj.get("reason")?.asString ?: "UNKNOWN"
                 val exp = if (jsonObj.has("expected") && !jsonObj.get("expected").isJsonNull) jsonObj.get("expected").asInt else expectedCount
+                val totalCaptured = dao.getCapturedCount(playlistId)
 
                 val finalStatus = when (reason) {
-                    "COMPLETE" -> CrawlStatus.COMPLETED
+                    "COMPLETE" -> if (totalCaptured > 0) CrawlStatus.COMPLETED else CrawlStatus.INCOMPLETE_HALTED
                     "STALLED", "CEILING" -> CrawlStatus.INCOMPLETE_HALTED
                     "USER_HALTED" -> CrawlStatus.PAUSED_PARTIAL
-                    else -> CrawlStatus.COMPLETED_WITH_GAPS
+                    else -> if (totalCaptured > 0) CrawlStatus.COMPLETED_WITH_GAPS else CrawlStatus.INCOMPLETE_HALTED
                 }
 
                 dao.finalizeCrawlTransactional(playlistId, finalStatus, exp)
-                val totalCaptured = dao.getCapturedCount(playlistId)
                 _pipelineState.value = CrawlPipelineStatus.Finished(playlistId, totalCaptured, exp, finalStatus)
             }
         }

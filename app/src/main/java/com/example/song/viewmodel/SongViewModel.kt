@@ -233,7 +233,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 repository.spotifyCrawlPipeline.prepareCrawl(
                     playlistId = playlistId,
                     initialExpectedCount = null,
-                    title = null
+                    title = null,
+                    isResume = true
                 )
                 // Force reload trigger
                 val current = _activeSpotifyCrawlUrl.value

@@ -106,10 +106,58 @@ class MusicService : MediaSessionService() {
         private const val KEY_LAST_QUEUE_IDS = "last_queue_ids"
         private const val KEY_LAST_INDEX = "last_played_index"
         private const val KEY_LAST_POSITION = "last_played_position"
+        private const val FOREGROUND_NOTIFICATION_ID = 1001
+        private const val FOREGROUND_CHANNEL_ID = "pulse_media_channel"
+    }
+
+    private fun startImmediateForegroundNotification() {
+        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                FOREGROUND_CHANNEL_ID,
+                "PulsePlayer Playback",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Active media playback notification"
+                setShowBadge(false)
+            }
+            notificationManager.createNotificationChannel(channel)
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification = NotificationCompat.Builder(this, FOREGROUND_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setContentTitle("PulsePlayer")
+            .setContentText("Initializing player...")
+            .setOngoing(true)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .build()
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    FOREGROUND_NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                )
+            } else {
+                startForeground(FOREGROUND_NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("PulseDebug", "Error starting immediate foreground service", e)
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
+        startImmediateForegroundNotification()
 
         val app = SongApplication.getInstance()
         val cache = app.playerCache
@@ -943,6 +991,11 @@ class MusicService : MediaSessionService() {
 
     private fun com.example.song.data.model.StreamingItem.toSong(): Song {
         return Song(id = id, title = title, artist = artist ?: "Unknown Artist", audioUri = youtubeUrl, imageUrl = thumbnailUrl, duration = duration)
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startImmediateForegroundNotification()
+        return super.onStartCommand(intent, flags, startId)
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession

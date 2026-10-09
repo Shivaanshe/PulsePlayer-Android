@@ -76,6 +76,11 @@ fun SpotifyCrawlerWebView(
         if (wv == null || isDestroyed) return
         isDestroyed = true
         try {
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
+                try {
+                    WebViewCompat.removeWebMessageListener(wv, "PulseBridge")
+                } catch (_: Exception) {}
+            }
             wv.evaluateJavascript("window.__spider?.stop?.();", null)
             wv.stopLoading()
             (wv.parent as? ViewGroup)?.removeView(wv)
@@ -249,7 +254,6 @@ fun SpotifyCrawlerWebView(
                                         var style = document.createElement('style');
                                         style.id = '__pulse_crawler_layout_override';
                                         style.innerHTML = `
-                                            /* Hide sidebars, topbars and overlays */
                                             nav,
                                             [data-testid="left-sidebar"],
                                             .Root__nav-bar,
@@ -284,8 +288,14 @@ fun SpotifyCrawlerWebView(
                                 // 2. Guard against double script injection
                                 if (scriptContent.isNotEmpty() && lastInjectedUrl != url) {
                                     lastInjectedUrl = url
-                                    Log.d("SpotifyCrawlerWebView", "DOM Hydrated. Injecting spotify_spider.js...")
-                                    view?.evaluateJavascript(scriptContent, null)
+                                    val resumeIdx = pipeline.resumeFromIndex
+                                    Log.d("SpotifyCrawlerWebView", "DOM Hydrated. Injecting spotify_spider.js with resumeFromIndex=$resumeIdx...")
+                                    val injectionCode = if (resumeIdx > 0) {
+                                        "$scriptContent\nspiderCrawl({ resumeFromIndex: $resumeIdx });"
+                                    } else {
+                                        scriptContent
+                                    }
+                                    view?.evaluateJavascript(injectionCode, null)
                                 }
                             }
                         }

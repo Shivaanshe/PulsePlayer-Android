@@ -36,6 +36,9 @@ interface SpotifyCrawlDao {
     @Query("SELECT COUNT(*) FROM playlist_tracks WHERE playlistId = :playlistId")
     suspend fun getCapturedCount(playlistId: String): Int
 
+    @Query("SELECT MAX(rowIndex) FROM playlist_tracks WHERE playlistId = :playlistId")
+    suspend fun getMaxCapturedIndex(playlistId: String): Int?
+
     @Query("DELETE FROM playlist_tracks WHERE playlistId = :playlistId")
     suspend fun clearTracksForPlaylist(playlistId: String)
 

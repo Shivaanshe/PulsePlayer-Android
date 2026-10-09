@@ -29,6 +29,8 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import java.io.File
 import android.content.Intent
+import android.app.PendingIntent
+import android.os.Build
 import android.os.Process
 import com.example.song.util.CrashTracker
 import com.example.song.util.ResilientDns
@@ -180,7 +182,7 @@ class SongApplication : Application(), ImageLoaderFactory {
             try {
                 Log.e("SongApplication", "Fatal uncaught crash intercepted!", throwable)
 
-                // Report fatal uncaught crash to Firebase Crashlytics before launching RecoveryActivity
+                // Report fatal uncaught crash to Firebase Crashlytics
                 CrashTracker.recordException(
                     throwable = throwable,
                     breadcrumb = "Fatal uncaught crash intercepted on thread '${thread.name}'",
@@ -191,18 +193,67 @@ class SongApplication : Application(), ImageLoaderFactory {
                 )
 
                 val crashLog = throwable.stackTraceToString()
-                val intent = Intent(this, com.example.song.ui.screens.RecoveryActivity::class.java).apply {
+                val recoveryIntent = Intent(this, com.example.song.ui.screens.RecoveryActivity::class.java).apply {
                     putExtra("EXTRA_CRASH_LOG", crashLog)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
                 }
-                startActivity(intent)
+
+                // Guard against Android 14/15 Background Activity Launch (BAL) blocks
+                var launchedDirectly = false
+                try {
+                    startActivity(recoveryIntent)
+                    launchedDirectly = true
+                } catch (e: Exception) {
+                    Log.w("SongApplication", "Direct RecoveryActivity launch blocked or failed (BAL restriction)", e)
+                }
+
+                if (!launchedDirectly) {
+                    showCrashNotification(recoveryIntent, crashLog)
+                }
             } catch (e: Exception) {
-                Log.e("SongApplication", "Failed to launch RecoveryActivity", e)
+                Log.e("SongApplication", "Failed to handle uncaught crash", e)
                 defaultHandler?.uncaughtException(thread, throwable)
             } finally {
                 Process.killProcess(Process.myPid())
                 exitProcess(10)
             }
+        }
+    }
+
+    private fun showCrashNotification(recoveryIntent: Intent, crashLog: String) {
+        try {
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
+            val channelId = "pulse_crash_recovery_channel"
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = android.app.NotificationChannel(
+                    channelId,
+                    "Crash Recovery",
+                    android.app.NotificationManager.IMPORTANCE_HIGH
+                ).apply {
+                    description = "Notifications for crash recovery and error logs"
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+
+            val pendingIntent = PendingIntent.getActivity(
+                this,
+                0,
+                recoveryIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val notification = androidx.core.app.NotificationCompat.Builder(this, channelId)
+                .setSmallIcon(android.R.drawable.stat_notify_error)
+                .setContentTitle("PulsePlayer Crash Intercepted")
+                .setContentText("Tap to view error details and restore app")
+                .setAutoCancel(true)
+                .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                .setContentIntent(pendingIntent)
+                .build()
+
+            notificationManager.notify(9999, notification)
+        } catch (e: Exception) {
+            Log.e("SongApplication", "Failed to post crash notification", e)
         }
     }
 
