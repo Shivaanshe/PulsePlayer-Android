@@ -6,6 +6,7 @@ import com.example.song.data.api.ITunesService
 import com.example.song.data.api.SpotifyService
 import com.example.song.data.dao.PlaylistDao
 import com.example.song.data.dao.SongDao
+import com.example.song.data.database.AppDatabase
 import com.example.song.data.model.Playlist
 import com.example.song.data.model.PlaylistSongCrossRef
 import com.example.song.data.model.Song
@@ -53,6 +54,59 @@ class SongRepository(
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(SpotifyService::class.java)
+    }
+
+    val spotifyCrawlDao: com.example.song.data.dao.SpotifyCrawlDao by lazy {
+        AppDatabase.getDatabase(SongApplication.getInstance()).spotifyCrawlDao()
+    }
+
+    val spotifyCrawlPipeline: com.example.song.data.crawler.SpotifyCrawlPipeline by lazy {
+        com.example.song.data.crawler.SpotifyCrawlPipeline(
+            spotifyCrawlDao,
+            SongApplication.getInstance().okHttpClient
+        )
+    }
+
+    suspend fun convertSpotifyCrawlToStreamingItems(playlistId: String): List<StreamingItem> = withContext(Dispatchers.IO) {
+        val tracks = spotifyCrawlDao.getTracksForPlaylistSync(playlistId)
+        val playlistMeta = spotifyCrawlDao.getPlaylist(playlistId)
+        val playlistTitle = playlistMeta?.title ?: "Spotify Playlist"
+        val playlistUrl = "https://open.spotify.com/playlist/$playlistId"
+        val firstCover = tracks.firstOrNull { !it.thumbnailUrl.isNullOrEmpty() }?.thumbnailUrl ?: ""
+
+        val items = mutableListOf<StreamingItem>()
+        items.add(
+            StreamingItem(
+                youtubeUrl = playlistUrl,
+                title = playlistTitle,
+                artist = "Spotify",
+                thumbnailUrl = firstCover,
+                isPlaylist = true
+            )
+        )
+
+        tracks.forEach { track ->
+            val query = "${track.title} ${track.artists}".trim()
+            val ytSearchUrl = if (!track.ytVideoId.isNullOrEmpty()) {
+                "https://www.youtube.com/watch?v=${track.ytVideoId}"
+            } else {
+                "ytsearch1:$query"
+            }
+
+            items.add(
+                StreamingItem(
+                    youtubeUrl = ytSearchUrl,
+                    title = track.title,
+                    artist = track.artists,
+                    thumbnailUrl = track.thumbnailUrl ?: firstCover,
+                    isPlaylist = false,
+                    parentPlaylistUrl = playlistUrl,
+                    duration = track.durationMs ?: 0L
+                )
+            )
+        }
+
+        items
     }
 
     private var downloadJob: Job? = null

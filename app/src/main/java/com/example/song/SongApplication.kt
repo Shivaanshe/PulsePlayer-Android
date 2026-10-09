@@ -224,6 +224,13 @@ class SongApplication : Application(), ImageLoaderFactory {
         
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // PRD §3.1: Reset any lingering INITIALIZING or CRAWLING records to PAUSED_PARTIAL on process startup
+                database.spotifyCrawlDao().recoverProcessDeath()
+            } catch (e: Exception) {
+                Log.e("SongApplication", "Failed process death recovery for spotify crawl status", e)
+            }
+
+            try {
                 Log.d("SongApplication", "Starting engine initialization...")
                 YoutubeDL.getInstance().init(this@SongApplication)
                 FFmpeg.getInstance().init(this@SongApplication)

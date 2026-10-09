@@ -188,6 +188,79 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _onlineSearchResults = MutableStateFlow<List<StreamingItem>>(emptyList())
     val onlineSearchResults: StateFlow<List<StreamingItem>> = _onlineSearchResults.asStateFlow()
 
+    val spotifyCrawlPipeline = repository.spotifyCrawlPipeline
+    val spotifyCrawlState = repository.spotifyCrawlPipeline.pipelineState
+
+    private val _activeSpotifyCrawlUrl = MutableStateFlow<String?>(null)
+    val activeSpotifyCrawlUrl: StateFlow<String?> = _activeSpotifyCrawlUrl.asStateFlow()
+
+    fun startSpotifyCrawl(url: String) {
+        viewModelScope.launch {
+            try {
+                _isExtracting.value = true
+                _extractionStatus.value = "Preflighting Spotify Playlist..."
+                val preflight = repository.spotifyCrawlPipeline.sanitizeAndPreflight(url)
+
+                if (preflight.route == com.example.song.data.crawler.SpotifyCrawlPipeline.PreflightRoute.UNAVAILABLE) {
+                    _extractionError.value = "Spotify Playlist Unavailable or Deleted"
+                    return@launch
+                }
+
+                repository.spotifyCrawlPipeline.prepareCrawl(
+                    playlistId = preflight.playlistId,
+                    initialExpectedCount = preflight.expectedCount,
+                    title = preflight.title
+                )
+                _activeSpotifyCrawlUrl.value = preflight.cleanUrl
+            } catch (e: Exception) {
+                Log.e("SongViewModel", "Failed launching Spotify crawler", e)
+                _extractionError.value = "Failed to launch Spotify crawler: ${e.message}"
+            } finally {
+                _isExtracting.value = false
+                _extractionStatus.value = null
+            }
+        }
+    }
+
+    fun dismissSpotifyCrawl() {
+        _activeSpotifyCrawlUrl.value = null
+    }
+
+    fun resumeSpotifyCrawl(playlistId: String, url: String) {
+        viewModelScope.launch {
+            try {
+                repository.spotifyCrawlPipeline.prepareCrawl(
+                    playlistId = playlistId,
+                    initialExpectedCount = null,
+                    title = null
+                )
+                // Force reload trigger
+                val current = _activeSpotifyCrawlUrl.value
+                _activeSpotifyCrawlUrl.value = null
+                delay(50)
+                _activeSpotifyCrawlUrl.value = current ?: url
+            } catch (e: Exception) {
+                Log.e("SongViewModel", "Failed resuming Spotify crawl", e)
+            }
+        }
+    }
+
+    fun importCapturedSpotifyPlaylist(playlistId: String) {
+        viewModelScope.launch {
+            try {
+                val items = repository.convertSpotifyCrawlToStreamingItems(playlistId)
+                if (items.isNotEmpty()) {
+                    repository.insertStreamingItems(items)
+                    PulseLogger.log("Imported ${items.size - 1} tracks from Spotify playlist.")
+                }
+            } catch (e: Exception) {
+                Log.e("SongViewModel", "Error importing captured Spotify playlist", e)
+            } finally {
+                _activeSpotifyCrawlUrl.value = null
+            }
+        }
+    }
+
     private val _isOnlineSearching = MutableStateFlow(false)
     val isOnlineSearching: StateFlow<Boolean> = _isOnlineSearching.asStateFlow()
 
@@ -289,6 +362,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 _extractionError.value = "App is offline. Please check your Internet connection."
                 return@launch
             }
+
+            if (url.contains("spotify.com/playlist") || url.contains("spotify.link") || url.contains("spotify:playlist:")) {
+                startSpotifyCrawl(url)
+                return@launch
+            }
+
             _isExtracting.value = true
             _extractionError.value = null
             _extractionProgress.value = 0.15f

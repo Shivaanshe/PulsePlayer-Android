@@ -95,6 +95,8 @@ fun DiscoverScreen(
     val pendingItems by viewModel.pendingStreamingItems.collectAsState()
     val duplicatePlaylistState by viewModel.duplicatePlaylistState.collectAsState()
     val extractionError by viewModel.extractionError.collectAsState()
+    val activeSpotifyCrawlUrl by viewModel.activeSpotifyCrawlUrl.collectAsState()
+    val spotifyCrawlState by viewModel.spotifyCrawlState.collectAsState()
     var isSearching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
     var showAddMenu by remember { mutableStateOf(false) }
@@ -1021,6 +1023,41 @@ fun DiscoverScreen(
                 }
             }
         }
+
+        activeSpotifyCrawlUrl?.let { crawlUrl ->
+            com.example.song.ui.components.SpotifyCrawlerOverlay(
+                targetUrl = crawlUrl,
+                pipeline = viewModel.spotifyCrawlPipeline,
+                pipelineState = spotifyCrawlState,
+                onPause = {
+                    scope.launch {
+                        viewModel.spotifyCrawlPipeline.postBridgeMessage("""{"v":1,"type":"PAUSE"}""")
+                    }
+                },
+                onResume = {
+                    val pId = (spotifyCrawlState as? com.example.song.data.crawler.CrawlPipelineStatus.Running)?.playlistId
+                        ?: (spotifyCrawlState as? com.example.song.data.crawler.CrawlPipelineStatus.Finished)?.playlistId
+                    if (pId != null) {
+                        viewModel.resumeSpotifyCrawl(pId, crawlUrl)
+                    } else {
+                        scope.launch {
+                            viewModel.spotifyCrawlPipeline.postBridgeMessage("""{"v":1,"type":"RESUME"}""")
+                        }
+                    }
+                },
+                onImportToLibrary = {
+                    val pId = (spotifyCrawlState as? com.example.song.data.crawler.CrawlPipelineStatus.Running)?.playlistId
+                        ?: (spotifyCrawlState as? com.example.song.data.crawler.CrawlPipelineStatus.Finished)?.playlistId
+                    if (pId != null) {
+                        viewModel.importCapturedSpotifyPlaylist(pId)
+                    }
+                },
+                onDismiss = {
+                    viewModel.dismissSpotifyCrawl()
+                }
+            )
+        }
+
         AnimatedVisibility(visible = isSelectionMode, enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut(), modifier = Modifier.zIndex(10f)) {
             Surface(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), shape = RoundedCornerShape(24.dp), color = Color.White.copy(alpha = 0.85f), tonalElevation = 8.dp, border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))) {
                 Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {

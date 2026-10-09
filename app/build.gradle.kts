@@ -85,6 +85,9 @@ dependencies {
     implementation(libs.androidx.room.ktx)
     ksp(libs.sqlite.jdbc)
 
+    // AndroidX WebKit for WebMessageListener and WebViewCompat
+    implementation("androidx.webkit:webkit:1.12.0")
+
     // Image Loading
     implementation("io.coil-kt:coil-compose:2.6.0")
 
