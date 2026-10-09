@@ -2,12 +2,11 @@
  * Spotify procedural rappelling spider crawler & high-velocity queue pipeline
  *
  * Features:
+ * - Brute-Force Shotgun Scroll Engine: scrollLastRowIntoView(), scrollTop mutation, event dispatching
  * - Rappelling Silk Strand: Spider hangs from top ceiling on a shimmering neon silk thread
- * - Pendulum Dangle: Gentle sinusoidal sway while suspended near screen center
  * - High-Velocity Extraction: Fast background DOM scraping (~3-5s for 330 tracks)
- * - Rapid Canvas Neon Scan Pulses: GPU-accelerated cyan, magenta, lime & electric violet boxes (Zero DOM mutation thrashing)
- * - Incremental Hydration Resolver: Micro-jump fast-forward for resumeFromIndex (PRD §10)
- * - Synthetic Scroll Event Dispatcher & Element-Targeted scrollIntoView() for React Virtual DOM Hydration
+ * - Recommendation Boundary Filter: Excludes "Recommended / Fans also like" sections (never captures track 331)
+ * - Correct Canvas Teardown Order: 60fps animation active during 600ms opacity fade-out AFTER FINISHED emission
  */
 (async function spiderCrawl(opts = {}) {
   // ---- Spotify Telemetry Guard --------------------------------------------
@@ -75,6 +74,7 @@
 
   // DOM helpers
   const rowsNow = () => [...document.querySelectorAll('[data-testid="tracklist-row"]')];
+
   const rawIdx = (row, fallbackIdx = 0) => {
     const n = parseInt(row.closest('[aria-rowindex]')?.getAttribute('aria-rowindex'), 10);
     if (Number.isFinite(n) && n > 0) return n;
@@ -142,6 +142,7 @@
     }
   }
 
+  // Brute-force "shotgun" scroll fallback chain with scrollIntoView and event dispatching
   function performScroll(dy) {
     if (!scroller || !scroller.isConnected) scroller = findScroller();
     const before = scroller ? scroller.scrollTop : 0;
@@ -234,11 +235,21 @@
 
   const withIndex = (r) => ({ ...r, rowIndex: base === null ? null : r.rowRaw - base });
 
-  // ---- Canvas setup (capped DPR for optimal 60fps) -------------------------
+  // ---- Canvas setup (capped DPR for optimal 60fps & delayed opacity fade-in)
   const canvas = document.createElement('canvas');
   canvas.id = '__spider_canvas';
-  Object.assign(canvas.style, { position: 'fixed', top: 0, left: 0, zIndex: 999999, pointerEvents: 'none' });
+  Object.assign(canvas.style, {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    zIndex: 999999,
+    pointerEvents: 'none',
+    opacity: '0',
+    transition: 'opacity 0.6s ease'
+  });
   document.body.appendChild(canvas);
+  setTimeout(() => { canvas.style.opacity = '1'; }, 50);
+
   const ctx = canvas.getContext('2d');
 
   let currentDpr = 1;
@@ -356,7 +367,7 @@
     return f;
   }
 
-  // Pure GPU Canvas Scan Highlight (No direct DOM style mutations)
+  // Pure GPU Canvas Scan Highlight
   function flashNeonBox(row) {
     const fields = fieldsOf(row);
     if (!fields.length) return;
@@ -590,15 +601,19 @@
   async function crawl() {
     let idle = 0, bottomHits = 0;
     while (!state.stopped && performance.now() - t0 < CFG.maxMs) {
-      // 1) Extract all currently mounted DOM rows immediately at max speed
+      // 1) Extract all currently mounted DOM rows immediately at max speed (excluding recommended rows)
       const newlyFound = [];
       const currentRows = rowsNow();
 
       for (const row of currentRows) {
+        // Boundary Guard: Stop immediately if expected count is reached (PRD §2.3)
+        if (expected && tracks.size >= expected) break;
+
         const raw = rawIdx(row);
         if (raw == null || tracks.has(raw)) continue;
         const rec = readRow(row, raw);
         if (!rec) continue;
+
         tracks.set(raw, rec);
         newlyFound.push(rec);
 
@@ -623,7 +638,7 @@
 
       if (expected && tracks.size >= expected && tracks.size > 0 && base !== null) return 'COMPLETE';
 
-      // 3) Rapid Auto-Scroll Step against virtual scroll container
+      // 3) Rapid Auto-Scroll Step against virtual scroll container (brute-force shotgun fallback chain)
       const currentY = scroller ? scroller.scrollTop : 0;
       const scrollHeight = scroller ? scroller.scrollHeight : document.documentElement.scrollHeight;
       const clientHeight = scroller ? scroller.clientHeight : window.innerHeight;
@@ -645,7 +660,7 @@
         bottomHits = 0;
       }
 
-      // Perform scroll step
+      // Perform scroll step using brute-force shotgun fallback chain
       const scrollAmount = Math.round(clientHeight * 0.75);
       const deltaMoved = performScroll(scrollAmount);
 
@@ -664,17 +679,21 @@
     reason = 'STALLED';
   }
 
-  // ---- finish -------------------------------------------------------------
+  // ---- finish & graceful opacity fade-out -----------------------------------
   const result = [...tracks.values()].sort((a, b) => a.rowRaw - b.rowRaw).map(withIndex);
   window.__spider.tracks = result;
   emit({ type: 'FINISHED', reason, captured: result.length, expected });
 
   boxes.forEach((x) => { x.rate = 3.5; });
   strands.forEach((x) => { x.rate = 5.0; });
-  state.done = true;
+
+  // Correct Teardown Sequence: Keep canvas active during fade-out, set state.done = true AFTER 600ms sleep
+  canvas.style.opacity = '0';
   await sleep(600);
+  state.done = true;
   cancelAnimationFrame(state.raf);
   window.removeEventListener('resize', fit);
+  canvas.remove();
 
   console.log(`[spider] ${reason}: captured ${result.length}${expected ? ' / ' + expected : ''} in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
   return result;
