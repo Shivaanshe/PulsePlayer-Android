@@ -28,6 +28,40 @@ object SpotifyResolver {
             .replace("&gt;", ">")
     }
 
+    fun sanitizeUrl(url: String): String {
+        val trimmed = url.trim()
+        if (trimmed.contains("spotify.com")) {
+            val playlistMatch = Regex("playlist/([A-Za-z0-9]{22})").find(trimmed)
+            if (playlistMatch != null) {
+                return "https://open.spotify.com/playlist/${playlistMatch.groupValues[1]}"
+            }
+            val trackMatch = Regex("track/([A-Za-z0-9]{22})").find(trimmed)
+            if (trackMatch != null) {
+                return "https://open.spotify.com/track/${trackMatch.groupValues[1]}"
+            }
+            val albumMatch = Regex("album/([A-Za-z0-9]{22})").find(trimmed)
+            if (albumMatch != null) {
+                return "https://open.spotify.com/album/${albumMatch.groupValues[1]}"
+            }
+        } else if (trimmed.contains("youtube.com") || trimmed.contains("youtu.be")) {
+            var clean = trimmed.removeSuffix("/")
+            if (clean.contains("?si=") || clean.contains("&si=")) {
+                clean = clean.replace(Regex("[?&]si=[^&]*"), "")
+                if (!clean.contains("?") && clean.contains("&")) {
+                    clean = clean.replaceFirst("&", "?")
+                }
+            }
+            if (clean.contains("?feature=") || clean.contains("&feature=")) {
+                clean = clean.replace(Regex("[?&]feature=[^&]*"), "")
+                if (!clean.contains("?") && clean.contains("&")) {
+                    clean = clean.replaceFirst("&", "?")
+                }
+            }
+            return clean
+        }
+        return trimmed.substringBefore("?").removeSuffix("/")
+    }
+
     suspend fun resolve(url: String, repository: SongRepository): List<StreamingItem> = withContext(Dispatchers.IO) {
         val isSingleTrack = url.contains("/track/")
 

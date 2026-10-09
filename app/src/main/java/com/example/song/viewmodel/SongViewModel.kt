@@ -251,9 +251,44 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             try {
                 val items = repository.convertSpotifyCrawlToStreamingItems(playlistId)
-                if (items.isNotEmpty()) {
+                if (items.isEmpty()) return@launch
+
+                val playlistHeader = items.find { it.isPlaylist }
+                if (playlistHeader != null) {
+                    val cleanUrl = com.example.song.util.SpotifyResolver.sanitizeUrl(playlistHeader.youtubeUrl)
+                    val sanitizedHeader = playlistHeader.copy(youtubeUrl = cleanUrl)
+                    val sanitizedItems = items.map { item ->
+                        if (item.isPlaylist) sanitizedHeader
+                        else item.copy(parentPlaylistUrl = cleanUrl)
+                    }
+
+                    val existingPlaylist = repository.getPlaylistByUrl(cleanUrl)
+                    if (existingPlaylist != null) {
+                        val existingTracks = repository.getItemsForPlaylistSync(cleanUrl)
+                        val newTracks = sanitizedItems.filter { !it.isPlaylist }
+                        val existingUrls = existingTracks.map { it.youtubeUrl }.toSet()
+                        val newUrls = newTracks.map { it.youtubeUrl }.toSet()
+
+                        _activeSpotifyCrawlUrl.value = null
+
+                        if (existingTracks.size == newTracks.size && existingUrls == newUrls) {
+                            _duplicatePlaylistState.value = DuplicatePlaylistState.AlreadyExists(existingPlaylist.title)
+                        } else {
+                            _duplicatePlaylistState.value = DuplicatePlaylistState.UpdateAvailable(
+                                existingPlaylist = existingPlaylist,
+                                newHeader = sanitizedHeader,
+                                newTracks = newTracks,
+                                existingCount = existingTracks.size,
+                                newCount = newTracks.size
+                            )
+                        }
+                        return@launch
+                    } else {
+                        repository.insertStreamingItems(sanitizedItems)
+                        PulseLogger.log("Imported ${sanitizedItems.size - 1} tracks from Spotify playlist.")
+                    }
+                } else {
                     repository.insertStreamingItems(items)
-                    PulseLogger.log("Imported ${items.size - 1} tracks from Spotify playlist.")
                 }
             } catch (e: Exception) {
                 Log.e("SongViewModel", "Error importing captured Spotify playlist", e)
@@ -468,10 +503,17 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             if (asCollection) {
                 val playlistHeader = items.find { it.isPlaylist }
                 if (playlistHeader != null) {
-                    val existingPlaylist = repository.getPlaylistByUrl(playlistHeader.youtubeUrl)
+                    val cleanUrl = com.example.song.util.SpotifyResolver.sanitizeUrl(playlistHeader.youtubeUrl)
+                    val sanitizedHeader = playlistHeader.copy(youtubeUrl = cleanUrl)
+                    val sanitizedItems = items.map { item ->
+                        if (item.isPlaylist) sanitizedHeader
+                        else item.copy(parentPlaylistUrl = cleanUrl)
+                    }
+
+                    val existingPlaylist = repository.getPlaylistByUrl(cleanUrl)
                     if (existingPlaylist != null) {
-                        val existingTracks = repository.getItemsForPlaylistSync(playlistHeader.youtubeUrl)
-                        val newTracks = items.filter { !it.isPlaylist }
+                        val existingTracks = repository.getItemsForPlaylistSync(cleanUrl)
+                        val newTracks = sanitizedItems.filter { !it.isPlaylist }
                         val existingUrls = existingTracks.map { it.youtubeUrl }.toSet()
                         val newUrls = newTracks.map { it.youtubeUrl }.toSet()
 
@@ -482,7 +524,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         } else {
                             _duplicatePlaylistState.value = DuplicatePlaylistState.UpdateAvailable(
                                 existingPlaylist = existingPlaylist,
-                                newHeader = playlistHeader,
+                                newHeader = sanitizedHeader,
                                 newTracks = newTracks,
                                 existingCount = existingTracks.size,
                                 newCount = newTracks.size
@@ -490,8 +532,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         }
                         return@launch
                     }
+                    repository.insertStreamingItems(sanitizedItems)
+                } else {
+                    repository.insertStreamingItems(items)
                 }
-                repository.insertStreamingItems(items)
             } else {
                 val filteredItems = items.filter { !it.isPlaylist }.map { 
                     it.copy(parentPlaylistUrl = null) 

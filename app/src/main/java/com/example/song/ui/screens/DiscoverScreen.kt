@@ -996,7 +996,7 @@ fun DiscoverScreen(
                         )
 
                         Text(
-                            text = "\"${state.existingPlaylist.title}\" is already in your library (${state.existingCount} tracks).\n\nThe imported link has ${state.newCount} tracks. Would you like to update the existing playlist?",
+                            text = "\"${state.existingPlaylist.title}\" is already in your library.\n\nCurrent: ${state.existingCount} tracks | New: ${state.newCount} tracks\n\nWould you like to update the existing playlist?",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.85f),
                             textAlign = TextAlign.Center

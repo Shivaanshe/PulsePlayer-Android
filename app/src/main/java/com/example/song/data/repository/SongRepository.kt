@@ -198,11 +198,13 @@ class SongRepository(
     }
 
     suspend fun getPlaylistByUrl(url: String): StreamingItem? = withContext(Dispatchers.IO) {
-        streamingDao.getPlaylistByUrl(url)
+        val cleanUrl = com.example.song.util.SpotifyResolver.sanitizeUrl(url)
+        streamingDao.getPlaylistByUrl(cleanUrl)
     }
 
     suspend fun getItemsForPlaylistSync(url: String): List<StreamingItem> = withContext(Dispatchers.IO) {
-        streamingDao.getItemsForPlaylistSync(url)
+        val cleanUrl = com.example.song.util.SpotifyResolver.sanitizeUrl(url)
+        streamingDao.getItemsForPlaylistSync(cleanUrl)
     }
 
     suspend fun smartMergePlaylist(
