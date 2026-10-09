@@ -119,18 +119,25 @@ class SpotifyCrawlPipeline(
     fun prepareCrawl(playlistId: String, initialExpectedCount: Int? = null, title: String? = null) {
         activePlaylistId = playlistId
         expectedCount = initialExpectedCount
-        activeGeneration = 1
+
+        // Drain channel buffer to clear stale messages from prior runs
+        while (messageChannel.tryReceive().isSuccess) {}
 
         scope.launch {
             val existing = dao.getPlaylist(playlistId)
             val now = System.currentTimeMillis()
+            activeGeneration = (existing?.crawlGeneration ?: 0) + 1
+
+            // PRD §2.4: Clear stale tracks from previous runs when starting a fresh crawl generation
+            dao.clearTracksForPlaylist(playlistId)
+
             if (existing != null) {
-                activeGeneration = existing.crawlGeneration
                 dao.updatePlaylist(
                     existing.copy(
                         title = title ?: existing.title,
                         expectedCount = initialExpectedCount ?: existing.expectedCount,
                         status = CrawlStatus.INITIALIZING,
+                        crawlGeneration = activeGeneration,
                         updatedAt = now
                     )
                 )
@@ -141,7 +148,7 @@ class SpotifyCrawlPipeline(
                         title = title,
                         expectedCount = initialExpectedCount,
                         status = CrawlStatus.INITIALIZING,
-                        crawlGeneration = 1,
+                        crawlGeneration = activeGeneration,
                         createdAt = now,
                         updatedAt = now
                     )
@@ -149,6 +156,13 @@ class SpotifyCrawlPipeline(
             }
             _pipelineState.value = CrawlPipelineStatus.Running(playlistId, 0, initialExpectedCount, CrawlStatus.INITIALIZING)
         }
+    }
+
+    fun stopCrawl() {
+        activePlaylistId = null
+        expectedCount = null
+        while (messageChannel.tryReceive().isSuccess) {}
+        _pipelineState.value = CrawlPipelineStatus.Idle
     }
 
     suspend fun postBridgeMessage(rawJson: String) {

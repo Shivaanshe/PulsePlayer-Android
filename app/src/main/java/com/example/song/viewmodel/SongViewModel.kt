@@ -224,6 +224,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissSpotifyCrawl() {
         _activeSpotifyCrawlUrl.value = null
+        repository.spotifyCrawlPipeline.stopCrawl()
     }
 
     fun resumeSpotifyCrawl(playlistId: String, url: String) {

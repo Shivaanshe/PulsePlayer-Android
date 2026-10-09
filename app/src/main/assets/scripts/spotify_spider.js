@@ -45,7 +45,7 @@
     stepRatio: 0.60,    // scroll step = 60% of container height
     topInset: 110,      // px at top of container hidden by sticky header
     bottomInset: 30,
-    visitMs: 160,       // deliberate, clear pacing per text item
+    visitMs: 80,        // fast pacing per item
     scrollMs: 240,      // swift, smooth scroll transitions
     scale: null,        // spider scale multiplier
     glitch: true,       // brief text warp where foot anchors
@@ -78,6 +78,7 @@
   const state = { stopped: false, done: false, raf: 0 };
   const tracks = new Map();
   const visited = new Set();
+  const emittedIndexes = new Set();
   let base = null;
 
   // DOM helpers
@@ -88,6 +89,11 @@
   };
 
   function findScroller() {
+    const explicit = document.querySelector('[data-overlayscrollbars-viewport]') ||
+                     document.querySelector('.Root__main-view') ||
+                     document.querySelector('main');
+    if (explicit && explicit.scrollHeight > explicit.clientHeight) return explicit;
+
     let el = rowsNow()[0]?.parentElement;
     while (el && el !== document.documentElement) {
       const oy = getComputedStyle(el).overflowY;
@@ -120,6 +126,21 @@
               document.body.innerText.match(/([\d][\d,]*)\s+songs?\b/i);
     const n = m ? parseInt(m[1].replace(/[^\d]/g, ''), 10) : NaN;
     return n > 0 && n <= 10000 ? n : null;
+  }
+
+  function getPlaylistTitle() {
+    const entityTitle = document.querySelector('[data-testid="entityTitle"]')?.innerText ||
+                        document.querySelector('h1[dir="auto"]')?.innerText;
+    if (entityTitle && entityTitle.trim()) return clean(entityTitle);
+
+    const ogTitle = document.querySelector('meta[property="og:title"]')?.content;
+    if (ogTitle && ogTitle.trim()) return clean(ogTitle);
+
+    const h1s = [...document.querySelectorAll('h1')].map(h => clean(h.innerText));
+    const validH1 = h1s.find(t => t && t !== 'Your Library' && t !== 'Home' && t !== 'Search' && t !== 'Spotify');
+    if (validH1) return validH1;
+
+    return document.title.replace(' | Spotify', '').replace(' - Spotify', '').trim() || 'Spotify Playlist';
   }
 
   function readRow(row, raw) {
@@ -172,8 +193,6 @@
   const L2 = 96 * S;  // Tibia length
   const REACH = L1 + L2; // ~174 * S
 
-  // Wide lateral stance (310px width), compact longitudinal height (110px height)
-  // Perfectly spans ~2 track rows, never stretches across 4 rows
   const LEG_CONFIGS = [
     // LEFT LEGS (side = -1)
     { id: 0, side: -1, group: 0, hip: { x: -9, y: 12 },  rest: { x: -125, y: 55 } },   // L1: Front-left
@@ -193,7 +212,6 @@
   const ease = (p) => (p < 0.5 ? 2 * p * p : 1 - Math.pow(-2 * p + 2, 2) / 2);
   const rnd = (a, b) => a + Math.random() * (b - a);
 
-  // Shortest-arc angle interpolation (prevents wrapping snaps)
   function lerpAngle(current, target, factor) {
     let diff = (target - current) % (Math.PI * 2);
     if (diff < -Math.PI) diff += Math.PI * 2;
@@ -201,7 +219,6 @@
     return current + diff * factor;
   }
 
-  // Transform local body-relative coordinates to world screen coordinates
   function localToWorld(lx, ly) {
     const cos = Math.cos(body.angle);
     const sin = Math.sin(body.angle);
@@ -211,7 +228,6 @@
     };
   }
 
-  // 2-Bone Inverse Kinematics with guaranteed outward knee flaring
   function solveLeg(hx, hy, fx, fy, side) {
     const dx = fx - hx, dy = fy - hy;
     const dist = Math.hypot(dx, dy) || 0.001;
@@ -223,7 +239,6 @@
     const bx = hx + ux * a;
     const by = hy + uy * a;
 
-    // Outward lateral normal vector perpendicular to body heading
     const cos = Math.cos(body.angle);
     const sin = Math.sin(body.angle);
     const outX = cos * side;
@@ -239,7 +254,6 @@
     };
   }
 
-  // Initialize legs in stable world coordinates
   const legs = LEG_CONFIGS.map((cfg) => {
     const restWorld = localToWorld(cfg.rest.x, cfg.rest.y);
     return {
@@ -254,12 +268,10 @@
     };
   });
 
-  // Leg stepping with deliberate, organic duration (default 210ms)
-  function startStep(leg, tx, ty, dur = 210) {
+  function startStep(leg, tx, ty, dur = 120) {
     leg.step = { fx: leg.x, fy: leg.y, tx, ty, t0: performance.now(), dur };
   }
 
-  // Safe row finder: always returns a row that is ACTUALLY visible on screen
   function getBestVisibleRow() {
     const rows = rowsNow();
     if (!rows.length) return null;
@@ -275,17 +287,16 @@
     return best;
   }
 
-  // Gracefully glides the spider to target position over time (zero teleport snaps)
-  async function glideSpiderTo(destX, destY, durationMs = 500) {
+  async function glideSpiderTo(destX, destY, durationMs = 300) {
     target.x = destX;
     target.y = destY;
     const start = performance.now();
     while (performance.now() - start < durationMs && !state.stopped) {
-      await sleep(25);
+      await sleep(20);
     }
   }
 
-  async function smoothRepositionToVisibleRow(durationMs = 500) {
+  async function smoothRepositionToVisibleRow(durationMs = 300) {
     const row = getBestVisibleRow();
     if (!row) return;
     const r = row.getBoundingClientRect();
@@ -297,7 +308,6 @@
   const boxes = [];
   const strands = [];
 
-  // Rich vibrant neon palette for text scan targets & laser threads
   const STYLE = {
     title:  { c: [0, 240, 255],   fill: 0.16 }, // Electric Cyan
     artist: { c: [255, 42, 133],  fill: 0.20 }, // Neon Magenta
@@ -318,7 +328,6 @@
     if (state.done && !boxes.length && !strands.length) return;
     ctx.clearRect(0, 0, innerWidth, innerHeight);
 
-    // Universal frame-by-frame scroll tracking:
     const currentScrollY = getScrollY();
     const scrollDelta = currentScrollY - lastScrollTop;
     lastScrollTop = currentScrollY;
@@ -333,7 +342,6 @@
       boxes.forEach((b) => { b.y -= scrollDelta; });
     }
 
-    // Soft spring boundary cushioning: gently cushions spider near screen edges (NO hard teleport snaps)
     if (body.y < 150) {
       body.y += (150 - body.y) * (1 - Math.exp(-dt * 5.0));
       if (target.y < 160) target.y = 160;
@@ -342,7 +350,6 @@
       if (target.y > innerHeight - 85) target.y = innerHeight - 85;
     }
 
-    // Emergency leg constraint: prevent feet from ever straying > 65px from body rest
     legs.forEach((l) => {
       if (l.isAnchor) return;
       const rw = localToWorld(l.cfg.rest.x, l.cfg.rest.y);
@@ -353,7 +360,6 @@
       }
     });
 
-    // 1. Highlight scan boxes (real-time DOM rect tracking = 0% drift)
     for (let i = boxes.length - 1; i >= 0; i--) {
       const b = boxes[i];
       b.life -= dt * (b.rate || 2.4);
@@ -379,7 +385,6 @@
       ctx.strokeRect(bx, by, bw, bh);
     }
 
-    // 2. Neon laser scan threads
     for (let i = strands.length - 1; i >= 0; i--) {
       const s = strands[i];
       s.life -= dt * (s.rate || 3.5);
@@ -402,38 +407,30 @@
     }
 
     if (!state.done) {
-      // Smooth body follow (graceful whether traveling down OR up)
       const px = body.x, py = body.y;
-      const smoothK = 1 - Math.exp(-dt * 4.6);
+      const smoothK = 1 - Math.exp(-dt * 5.5);
       body.x += (target.x - body.x) * smoothK;
       body.y += (target.y - body.y) * smoothK;
       body.vx = (body.x - px) / Math.max(dt, 0.001);
       body.vy = (body.y - py) / Math.max(dt, 0.001);
 
-      // STABLE DOWNWARD HEADING WITH DYNAMIC LATERAL BANKING:
-      // Permanently faces down (+Y), banks smoothly into lateral trajectory (clamped to ±26°).
-      // Zero 360° spins whether descending or ascending!
       const lateralOffset = target.x - body.x;
       const lateralBank = -Math.atan2(lateralOffset, 85 * S);
       const targetHeading = Math.max(-0.45, Math.min(0.45, lateralBank));
       body.angle = lerpAngle(body.angle, targetHeading, 1 - Math.exp(-dt * 6.0));
 
-      // FASTER, MORE RESPONSIVE CAMERA TRACKING SCROLL:
-      // When spider reaches lower 40% of the screen, scrolls down faster (up to 12px/frame)
-      // to keep the tracklist cruising smoothly without holding up the spider!
       if (scroller && body.y > innerHeight * 0.40) {
-        const scrollStep = Math.min(12, (body.y - innerHeight * 0.40) * 0.16);
+        const scrollStep = Math.min(14, (body.y - innerHeight * 0.40) * 0.20);
         scroller.scrollTop += scrollStep;
       }
 
-      // Leg step progression: deliberate, smooth arachnid arc (~210ms)
       legs.forEach((l) => {
         if (l.step) {
           const p = Math.min(1, (ts - l.step.t0) / l.step.dur);
           const e = ease(p);
           l.x = l.step.fx + (l.step.tx - l.step.fx) * e;
           l.y = l.step.fy + (l.step.ty - l.step.fy) * e;
-          l.lift = Math.sin(p * Math.PI) * 16 * S; // clear, elegant leg lift
+          l.lift = Math.sin(p * Math.PI) * 16 * S;
           if (p >= 1) {
             l.x = l.step.tx;
             l.y = l.step.ty;
@@ -444,9 +441,6 @@
         }
       });
 
-      // Directional arachnid walking:
-      // When moving DOWN, dirY > 0 (steps reach forward/down).
-      // When moving UP, dirY < 0 (steps reach upward, climbing gracefully!).
       const speed = Math.hypot(body.vx, body.vy);
       const isMoving = speed > 4;
       const dirX = isMoving ? body.vx / speed : -Math.sin(body.angle);
@@ -465,28 +459,23 @@
         const restWorld = localToWorld(l.cfg.rest.x, l.cfg.rest.y);
         const err = Math.hypot(l.x - restWorld.x, l.y - restWorld.y);
 
-        // Emergency threshold: if stretched > 50px, step immediately
         const isEmergency = err > 50 * S;
         const canStep = (l.cfg.group === 0 && !steppingGrp1) || (l.cfg.group === 1 && !steppingGrp0);
 
-        // Slower, deliberate stepping rhythm: steps take 210ms with 160ms cadence
-        if (isEmergency || (err > 32 * S && canStep && (ts - l.lastStep) > 160)) {
+        if (isEmergency || (err > 32 * S && canStep && (ts - l.lastStep) > 100)) {
           const plantX = restWorld.x + strideX + rnd(-3, 3) * S;
           const plantY = restWorld.y + strideY + rnd(-3, 3) * S;
-          startStep(l, plantX, plantY, 210); // deliberate, stately 210ms step
+          startStep(l, plantX, plantY, 140);
           l.lastStep = ts;
         }
       });
 
-      // Calculate kinematics for all 8 legs with outward knee guarantee
       const legPoints = legs.map((l) => {
         const hipWorld = localToWorld(l.cfg.hip.x, l.cfg.hip.y);
         const { knee, foot } = solveLeg(hipWorld.x, hipWorld.y, l.x, l.y, l.cfg.side);
         return { hip: hipWorld, knee, foot, l };
       });
 
-      // --- THIN WHITE WIREFRAME LEG RENDERING ---
-      // Pass 1: Faint ambient white bloom
       ctx.beginPath();
       legPoints.forEach(({ hip, knee, foot }) => {
         ctx.moveTo(hip.x, hip.y);
@@ -497,20 +486,16 @@
       ctx.lineWidth = 3.0 * S;
       ctx.stroke();
 
-      // Pass 2: Crisp thin white wireframe segment
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
       ctx.lineWidth = 1.2 * S;
       ctx.stroke();
 
-      // Joints & feet
       legPoints.forEach(({ knee, foot, l }) => {
-        // Knee joint: crisp white micro-bead
         ctx.fillStyle = '#ffffff';
         ctx.beginPath();
         ctx.arc(knee.x, knee.y, 2.4 * S, 0, Math.PI * 2);
         ctx.fill();
 
-        // Foot tip: radiates text neon color when anchored, crisp white otherwise
         if (l.isAnchor && l.anchorKind && STYLE[l.anchorKind]) {
           ctx.fillStyle = rgba(STYLE[l.anchorKind].c, 1);
           ctx.beginPath();
@@ -525,12 +510,10 @@
         }
       });
 
-      // --- THIN WHITE WIREFRAME SPIDER BODY ---
       ctx.save();
       ctx.translate(body.x, body.y);
       ctx.rotate(body.angle);
 
-      // 1. Abdomen (REAR / -Y): Sleek wireframe bulb with structural ribs
       ctx.fillStyle = 'rgba(12, 16, 26, 0.65)';
       ctx.beginPath();
       ctx.ellipse(0, -13 * S, 10 * S, 15 * S, 0, 0, Math.PI * 2);
@@ -540,20 +523,17 @@
       ctx.lineWidth = 1.2 * S;
       ctx.stroke();
 
-      // Structural wireframe ribs
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.30)';
       ctx.lineWidth = 0.9 * S;
       ctx.beginPath(); ctx.ellipse(0, -8 * S, 8 * S, 2.5 * S, 0, 0, Math.PI); ctx.stroke();
       ctx.beginPath(); ctx.ellipse(0, -13 * S, 9 * S, 2.8 * S, 0, 0, Math.PI); ctx.stroke();
       ctx.beginPath(); ctx.ellipse(0, -18 * S, 7 * S, 2.5 * S, 0, 0, Math.PI); ctx.stroke();
 
-      // Rear spinneret node
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(0, -26 * S, 1.6 * S, 0, Math.PI * 2);
       ctx.fill();
 
-      // 2. Cephalothorax / Head (FRONT / +Y): Sleek forward wireframe shield
       ctx.fillStyle = 'rgba(12, 16, 26, 0.70)';
       ctx.beginPath();
       ctx.ellipse(0, 8 * S, 8 * S, 10 * S, 0, 0, Math.PI * 2);
@@ -563,17 +543,14 @@
       ctx.lineWidth = 1.3 * S;
       ctx.stroke();
 
-      // Front optical sensors (pure white glowing eye nodes)
       ctx.fillStyle = '#ffffff';
       ctx.beginPath(); ctx.arc(-2.6 * S, 13 * S, 2.0 * S, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(2.6 * S, 13 * S, 2.0 * S, 0, Math.PI * 2); ctx.fill();
 
-      // Lateral secondary sensors
       ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
       ctx.beginPath(); ctx.arc(-4.6 * S, 9 * S, 1.3 * S, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(4.6 * S, 9 * S, 1.3 * S, 0, Math.PI * 2); ctx.fill();
 
-      // Front tactile feelers (pedipalps)
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
       ctx.lineWidth = 1.1 * S;
       ctx.beginPath();
@@ -604,14 +581,12 @@
   function fieldsOf(row) {
     const f = [];
 
-    // 1. Title (only real visible text)
     const titleEl = row.querySelector('a[href*="/track/"] div[dir="auto"]') ||
                     row.querySelector('div[data-encore-id="textTrackTitle"]') ||
                     row.querySelector('a[href*="/track/"]') ||
                     row.querySelector('div[dir="auto"]');
     if (isValidField(titleEl)) f.push({ el: titleEl, kind: 'title' });
 
-    // 2. Artists (only real visible text)
     const artistEls = [...row.querySelectorAll('a[href*="/artist/"]')];
     for (const a of artistEls) {
       if (isValidField(a) && !f.some((x) => x.el === a)) {
@@ -620,7 +595,6 @@
       }
     }
 
-    // 3. Duration (only real visible text)
     const timeEl = [...row.querySelectorAll('div,span')].find(
       (e) => !e.children.length && TIME_RE.test((e.textContent || '').trim()) && isValidField(e)
     );
@@ -634,33 +608,30 @@
     const prev = { t: el.style.transform, o: el.style.transformOrigin };
     el.style.transformOrigin = 'left center';
     el.style.transform = `scale(1.03) rotate(${(Math.random() * 1.4 - 0.7).toFixed(2)}deg)`;
-    setTimeout(() => { el.style.transform = prev.t; el.style.transformOrigin = prev.o; }, 160);
+    setTimeout(() => { el.style.transform = prev.t; el.style.transformOrigin = prev.o; }, 120);
   }
 
   // Visit a single track row with deliberate, organic anchor-pull locomotion
-  async function visit(row) {
+  async function visit(row, rec) {
     const items = fieldsOf(row);
     if (!items.length) return;
 
     for (const o of items) {
       if (state.stopped) break;
-      const r = o.el.getBoundingClientRect(); // Fresh on-screen rect
+      const r = o.el.getBoundingClientRect();
       const anchorX = r.left + r.width * rnd(0.35, 0.65);
       const anchorY = r.top + r.height * 0.5;
 
-      // 1. Lead front leg reaches forward with a deliberate, smooth arc (200ms)
       const leadLeg = anchorX < body.x ? legs[0] : legs[4];
       leadLeg.isAnchor = true;
       leadLeg.anchorKind = o.kind;
-      startStep(leadLeg, anchorX, anchorY, 200);
-      await sleep(210); // Wait for foot to plant gracefully
-
-      // 2. Body pulls forward smoothly toward anchor point
-      target.x = anchorX - (leadLeg.cfg.rest.x * 0.68 * S);
-      target.y = anchorY - (leadLeg.cfg.rest.y * 0.68 * S);
+      startStep(leadLeg, anchorX, anchorY, 140);
       await sleep(130);
 
-      // 3. Text scanned: create vibrant neon scan box & laser strand
+      target.x = anchorX - (leadLeg.cfg.rest.x * 0.68 * S);
+      target.y = anchorY - (leadLeg.cfg.rest.y * 0.68 * S);
+      await sleep(80);
+
       boxes.push({
         el: o.el,
         x: r.left - 4,
@@ -668,7 +639,7 @@
         w: r.width + 8,
         h: r.height + 4,
         s: STYLE[o.kind],
-        life: 1.1,
+        life: 0.9,
       });
 
       strands.push({
@@ -679,17 +650,23 @@
         x2: anchorX,
         y2: anchorY,
         color: STYLE[o.kind].c,
-        life: 0.80,
+        life: 0.70,
       });
 
       glitch(o.el);
       await sleep(CFG.visitMs);
 
-      // 4. Release text anchor and scuttle forward deliberately
       leadLeg.isAnchor = false;
       const nextRest = localToWorld(leadLeg.cfg.rest.x, leadLeg.cfg.rest.y);
-      startStep(leadLeg, nextRest.x, nextRest.y, 180);
-      await sleep(90);
+      startStep(leadLeg, nextRest.x, nextRest.y, 120);
+      await sleep(50);
+    }
+
+    // Emit row immediately upon physical visit completion so progress bar and spider position stay 100% in sync!
+    if (rec && !emittedIndexes.has(rec.rowRaw)) {
+      emittedIndexes.add(rec.rowRaw);
+      emit({ type: 'BATCH', tracks: [withIndex(rec)] });
+      emit({ type: 'PROGRESS', captured: emittedIndexes.size, expected, distinctIndexes: emittedIndexes.size, maxIndex: Math.max(0, ...tracks.keys()), phase: 'SCAN' });
     }
   }
 
@@ -709,7 +686,7 @@
   lastScrollTop = getScrollY();
 
   const expected = CFG.expected ?? parseExpected();
-  const pageTitle = clean(document.querySelector('h1')?.innerText || document.title);
+  const pageTitle = getPlaylistTitle();
   emit({ type: 'META', title: pageTitle, expectedCount: expected, countInferred: expected == null });
 
   const viewRect = () => (scroller === document.scrollingElement
@@ -740,26 +717,24 @@
 
   console.log('[spider] scroller:', scroller, '| expected:', expected);
 
-  // Position spider gracefully on the first visible row without teleport snaps
-  await smoothRepositionToVisibleRow(400);
+  await smoothRepositionToVisibleRow(300);
 
   async function crawl() {
     let idle = 0, bottomHits = 0;
     while (!state.stopped && performance.now() - t0 < CFG.maxMs) {
-      // 1) Extract mounted rows immediately
-      const batch = [];
+      // 1) Extract mounted rows into local tracks map
+      const newlyFound = [];
       for (const row of rowsNow()) {
         const raw = rawIdx(row);
         if (raw == null || tracks.has(raw)) continue;
         const rec = readRow(row, raw);
         if (!rec) continue;
         tracks.set(raw, rec);
-        batch.push(rec);
+        newlyFound.push(rec);
       }
-      if (batch.length && base === null) base = Math.min(...tracks.keys()) - 1;
-      if (batch.length) emit({ type: 'BATCH', tracks: batch.map(withIndex) });
+      if (newlyFound.length && base === null) base = Math.min(...tracks.keys()) - 1;
 
-      // 2) Spider crawls in-view rows smoothly in order
+      // 2) Spider walks in-view rows smoothly in order and emits tracks in lockstep on visit
       let visitedNow = 0;
       const todo = rowsNow()
         .map((row) => ({ row, raw: rawIdx(row) }))
@@ -769,18 +744,21 @@
       for (const { row, raw } of todo) {
         if (state.stopped) break;
         visited.add(raw);
-        if (row.isConnected) { await visit(row); visitedNow++; }
+        const rec = tracks.get(raw);
+        if (row.isConnected) {
+          await visit(row, rec);
+          visitedNow++;
+        }
       }
 
-      emit({ type: 'PROGRESS', captured: tracks.size, expected, distinctIndexes: tracks.size, maxIndex: Math.max(0, ...tracks.keys()), phase: 'SCAN' });
-      if (expected && tracks.size >= expected && base !== null) return 'COMPLETE';
+      if (expected && emittedIndexes.size >= expected && base !== null) return 'COMPLETE';
 
-      // 3) Advance smoothly down when all visible rows are done
+      // 3) Advance smoothly down when visible rows are done
       boxes.forEach((x) => { x.rate = 2.5; });
       strands.forEach((x) => { x.rate = 4.0; });
       const before = scroller.scrollTop;
       const atBottom = before + scroller.clientHeight >= scroller.scrollHeight - 6;
-      const progressed = batch.length > 0 || visitedNow > 0;
+      const progressed = newlyFound.length > 0 || visitedNow > 0;
 
       if (atBottom && !progressed) {
         if (++bottomHits >= 3) return 'BOTTOM';
@@ -788,7 +766,6 @@
         bottomHits = 0;
       }
 
-      // Swift, smooth forward advance to mount next tracks
       await tweenScroll(step(), CFG.scrollMs);
       const moved = scroller.scrollTop - before;
 
@@ -817,7 +794,6 @@
   await sleep(800);
   cancelAnimationFrame(state.raf);
   window.removeEventListener('resize', fit);
-  canvas.remove();
 
   console.log(`[spider] ${reason}: captured ${result.length}${expected ? ' / ' + expected : ''} in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
   return result;
