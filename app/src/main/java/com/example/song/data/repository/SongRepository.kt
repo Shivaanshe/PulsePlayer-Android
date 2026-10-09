@@ -84,6 +84,7 @@ class SongRepository(
     val allSongIdsInPlaylists: Flow<List<Int>> = playlistDao.getAllSongIdsInPlaylists()
 
     suspend fun scanAndRestoreSongs() = withContext(Dispatchers.IO) {
+        cleanUpDuplicateSingleSongs()
         val folders = listOf(File(baseDir, "Music"), File(baseDir, "DownloadedMusic"))
         val existingUris = songDao.getAllSongsSync().map { it.audioUri }.toSet()
 
@@ -105,8 +106,84 @@ class SongRepository(
         }
     }
 
+    suspend fun getTopLevelSingleSong(url: String, title: String, artist: String?): StreamingItem? = withContext(Dispatchers.IO) {
+        streamingDao.getTopLevelSingleSong(url, title, artist)
+    }
+
+    suspend fun cleanUpDuplicateSingleSongs() = withContext(Dispatchers.IO) {
+        val allSingleSongs = streamingDao.getAllTopLevelSingleSongsSync()
+        val grouped = allSingleSongs.groupBy { item ->
+            val keyTitle = item.title.lowercase().trim()
+            val keyArtist = item.artist?.lowercase()?.trim() ?: ""
+            if (item.youtubeUrl.startsWith("http")) item.youtubeUrl else "$keyTitle|$keyArtist"
+        }
+
+        grouped.forEach { (_, duplicates) ->
+            if (duplicates.size > 1) {
+                val toDelete = duplicates.drop(1)
+                toDelete.forEach { streamingDao.deleteItem(it) }
+            }
+        }
+    }
+
     fun getItemsForStreamingPlaylist(playlistUrl: String): Flow<List<StreamingItem>> {
         return streamingDao.getItemsForPlaylist(playlistUrl)
+    }
+
+    suspend fun getPlaylistByUrl(url: String): StreamingItem? = withContext(Dispatchers.IO) {
+        streamingDao.getPlaylistByUrl(url)
+    }
+
+    suspend fun getItemsForPlaylistSync(url: String): List<StreamingItem> = withContext(Dispatchers.IO) {
+        streamingDao.getItemsForPlaylistSync(url)
+    }
+
+    suspend fun smartMergePlaylist(
+        existingPlaylist: StreamingItem,
+        newPlaylistHeader: StreamingItem,
+        newTracks: List<StreamingItem>
+    ) = withContext(Dispatchers.IO) {
+        val existingTracks = streamingDao.getItemsForPlaylistSync(existingPlaylist.youtubeUrl)
+        val existingTracksByUrl = existingTracks.associateBy { it.youtubeUrl }
+
+        val updatedOrNewTracks = mutableListOf<StreamingItem>()
+        val processedExistingUrls = mutableSetOf<String>()
+
+        newTracks.forEachIndexed { index, newTrack ->
+            val existingTrack = existingTracksByUrl[newTrack.youtubeUrl]
+            if (existingTrack != null) {
+                processedExistingUrls.add(existingTrack.youtubeUrl)
+                updatedOrNewTracks.add(
+                    existingTrack.copy(
+                        title = newTrack.title,
+                        artist = newTrack.artist ?: existingTrack.artist,
+                        thumbnailUrl = newTrack.thumbnailUrl ?: existingTrack.thumbnailUrl,
+                        duration = if (newTrack.duration > 0) newTrack.duration else existingTrack.duration,
+                        position = index,
+                        parentPlaylistUrl = existingPlaylist.youtubeUrl
+                    )
+                )
+            } else {
+                updatedOrNewTracks.add(
+                    newTrack.copy(
+                        id = 0,
+                        parentPlaylistUrl = existingPlaylist.youtubeUrl,
+                        position = index
+                    )
+                )
+            }
+        }
+
+        val tracksToDelete = existingTracks.filter { it.youtubeUrl !in processedExistingUrls }
+        tracksToDelete.forEach { streamingDao.deleteItem(it) }
+
+        val updatedHeader = existingPlaylist.copy(
+            title = newPlaylistHeader.title,
+            artist = newPlaylistHeader.artist ?: existingPlaylist.artist,
+            thumbnailUrl = newPlaylistHeader.thumbnailUrl ?: existingPlaylist.thumbnailUrl
+        )
+        streamingDao.updateItems(listOf(updatedHeader))
+        streamingDao.insertItems(updatedOrNewTracks)
     }
 
     suspend fun insertStreamingItems(items: List<StreamingItem>) {

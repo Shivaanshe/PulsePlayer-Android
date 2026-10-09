@@ -50,4 +50,25 @@ interface StreamingDao {
     
     @Query("DELETE FROM streaming_items WHERE parentPlaylistUrl = :playlistUrl")
     suspend fun deletePlaylistItems(playlistUrl: String)
+
+    @Query("SELECT * FROM streaming_items WHERE isPlaylist = 1 AND youtubeUrl = :url LIMIT 1")
+    suspend fun getPlaylistByUrl(url: String): StreamingItem?
+
+    @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl = :playlistUrl ORDER BY position ASC, id ASC")
+    suspend fun getItemsForPlaylistSync(playlistUrl: String): List<StreamingItem>
+
+    @Query("""
+        SELECT * FROM streaming_items 
+        WHERE parentPlaylistUrl IS NULL 
+          AND isPlaylist = 0 
+          AND (
+              youtubeUrl = :url 
+              OR (title = :title AND (:artist IS NULL OR artist = :artist))
+          )
+        LIMIT 1
+    """)
+    suspend fun getTopLevelSingleSong(url: String, title: String, artist: String?): StreamingItem?
+
+    @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl IS NULL AND isPlaylist = 0")
+    suspend fun getAllTopLevelSingleSongsSync(): List<StreamingItem>
 }

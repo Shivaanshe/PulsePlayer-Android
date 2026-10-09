@@ -93,6 +93,7 @@ fun DiscoverScreen(
     val isPlaying by viewModel.isPlaying.collectAsState()
     val currentPlayingSong by viewModel.currentPlayingSong.collectAsState()
     val pendingItems by viewModel.pendingStreamingItems.collectAsState()
+    val duplicatePlaylistState by viewModel.duplicatePlaylistState.collectAsState()
     val extractionError by viewModel.extractionError.collectAsState()
     var isSearching by remember { mutableStateOf(false) }
     var searchQuery by remember { mutableStateOf("") }
@@ -905,6 +906,115 @@ fun DiscoverScreen(
                                         Text("Cancel", color = Color.White.copy(alpha = 0.60f), fontWeight = FontWeight.Medium)
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (duplicatePlaylistState is com.example.song.viewmodel.DuplicatePlaylistState.AlreadyExists) {
+            val state = duplicatePlaylistState as com.example.song.viewmodel.DuplicatePlaylistState.AlreadyExists
+            Dialog(
+                onDismissRequest = { viewModel.clearDuplicatePlaylistState() },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(0.9f),
+                    shape = RoundedCornerShape(28.dp),
+                    color = Color(0xFF141A16).copy(alpha = 0.98f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.size(56.dp).background(Color(0xFFFFB74D).copy(alpha = 0.2f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Info, contentDescription = null, tint = Color(0xFFFFB74D), modifier = Modifier.size(32.dp))
+                        }
+
+                        Text(
+                            text = "Playlist Already Added",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Text(
+                            text = "\"${state.title}\" is already present in your library with all its songs.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Button(
+                            onClick = { viewModel.clearDuplicatePlaylistState() },
+                            modifier = Modifier.fillMaxWidth().height(48.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676), contentColor = Color.Black),
+                            shape = RoundedCornerShape(16.dp)
+                        ) {
+                            Text("Got It", fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+        }
+
+        if (duplicatePlaylistState is com.example.song.viewmodel.DuplicatePlaylistState.UpdateAvailable) {
+            val state = duplicatePlaylistState as com.example.song.viewmodel.DuplicatePlaylistState.UpdateAvailable
+            Dialog(
+                onDismissRequest = { viewModel.clearDuplicatePlaylistState() },
+                properties = DialogProperties(usePlatformDefaultWidth = false)
+            ) {
+                Surface(
+                    modifier = Modifier.fillMaxWidth(0.9f),
+                    shape = RoundedCornerShape(28.dp),
+                    color = Color(0xFF141A16).copy(alpha = 0.98f),
+                    border = BorderStroke(1.dp, Color.White.copy(alpha = 0.2f))
+                ) {
+                    Column(
+                        modifier = Modifier.padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier.size(56.dp).background(Color(0xFF00E676).copy(alpha = 0.2f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Update, contentDescription = null, tint = Color(0xFF00E676), modifier = Modifier.size(32.dp))
+                        }
+
+                        Text(
+                            text = "Update Playlist?",
+                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Text(
+                            text = "\"${state.existingPlaylist.title}\" is already in your library (${state.existingCount} tracks).\n\nThe imported link has ${state.newCount} tracks. Would you like to update the existing playlist?",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = Color.White.copy(alpha = 0.85f),
+                            textAlign = TextAlign.Center
+                        )
+
+                        Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Button(
+                                onClick = { viewModel.confirmUpdatePlaylist() },
+                                modifier = Modifier.fillMaxWidth().height(50.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00E676), contentColor = Color.Black),
+                                shape = RoundedCornerShape(16.dp)
+                            ) {
+                                Text("Update Playlist", fontWeight = FontWeight.Bold)
+                            }
+
+                            TextButton(
+                                onClick = { viewModel.clearDuplicatePlaylistState() },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Cancel", color = Color.White.copy(alpha = 0.6f), fontWeight = FontWeight.Medium)
                             }
                         }
                     }

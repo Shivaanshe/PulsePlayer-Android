@@ -170,6 +170,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingStreamingItems = MutableStateFlow<List<StreamingItem>>(emptyList())
     val pendingStreamingItems: StateFlow<List<StreamingItem>> = _pendingStreamingItems.asStateFlow()
 
+    private val _duplicatePlaylistState = MutableStateFlow<DuplicatePlaylistState>(DuplicatePlaylistState.Idle)
+    val duplicatePlaylistState: StateFlow<DuplicatePlaylistState> = _duplicatePlaylistState.asStateFlow()
+
     private val _pendingDownloadItems = MutableStateFlow<List<StreamingItem>>(emptyList())
     val pendingDownloadItems: StateFlow<List<StreamingItem>> = _pendingDownloadItems.asStateFlow()
 
@@ -230,6 +233,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
+        viewModelScope.launch {
+            repository.cleanUpDuplicateSingleSongs()
+        }
         viewModelScope.launch {
             repository.allSongs.collect { songs ->
                 _allSongs.value = songs
@@ -330,7 +336,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 val isCollection = items.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
                 
                 if (items.size == 1 && !isCollection) {
-                    repository.insertStreamingItems(items)
+                    val singleSong = items.first()
+                    val existing = repository.getTopLevelSingleSong(singleSong.youtubeUrl, singleSong.title, singleSong.artist)
+                    if (existing != null) {
+                        _extractionError.value = "This song is already in your Recommended list."
+                    } else {
+                        repository.insertStreamingItems(items)
+                    }
                 } else {
                     _pendingStreamingItems.value = items
                 }
@@ -373,15 +385,65 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             if (items.isEmpty()) return@launch
 
             if (asCollection) {
+                val playlistHeader = items.find { it.isPlaylist }
+                if (playlistHeader != null) {
+                    val existingPlaylist = repository.getPlaylistByUrl(playlistHeader.youtubeUrl)
+                    if (existingPlaylist != null) {
+                        val existingTracks = repository.getItemsForPlaylistSync(playlistHeader.youtubeUrl)
+                        val newTracks = items.filter { !it.isPlaylist }
+                        val existingUrls = existingTracks.map { it.youtubeUrl }.toSet()
+                        val newUrls = newTracks.map { it.youtubeUrl }.toSet()
+
+                        _pendingStreamingItems.value = emptyList()
+
+                        if (existingTracks.size == newTracks.size && existingUrls == newUrls) {
+                            _duplicatePlaylistState.value = DuplicatePlaylistState.AlreadyExists(existingPlaylist.title)
+                        } else {
+                            _duplicatePlaylistState.value = DuplicatePlaylistState.UpdateAvailable(
+                                existingPlaylist = existingPlaylist,
+                                newHeader = playlistHeader,
+                                newTracks = newTracks,
+                                existingCount = existingTracks.size,
+                                newCount = newTracks.size
+                            )
+                        }
+                        return@launch
+                    }
+                }
                 repository.insertStreamingItems(items)
             } else {
                 val filteredItems = items.filter { !it.isPlaylist }.map { 
                     it.copy(parentPlaylistUrl = null) 
                 }
-                repository.insertStreamingItems(filteredItems)
+                val nonDuplicates = filteredItems.filter { item ->
+                    repository.getTopLevelSingleSong(item.youtubeUrl, item.title, item.artist) == null
+                }
+                if (nonDuplicates.isNotEmpty()) {
+                    repository.insertStreamingItems(nonDuplicates)
+                } else {
+                    _extractionError.value = "Selected song is already in your Recommended list."
+                }
             }
             _pendingStreamingItems.value = emptyList()
         }
+    }
+
+    fun confirmUpdatePlaylist() {
+        viewModelScope.launch {
+            val state = _duplicatePlaylistState.value
+            if (state is DuplicatePlaylistState.UpdateAvailable) {
+                repository.smartMergePlaylist(
+                    existingPlaylist = state.existingPlaylist,
+                    newPlaylistHeader = state.newHeader,
+                    newTracks = state.newTracks
+                )
+                _duplicatePlaylistState.value = DuplicatePlaylistState.Idle
+            }
+        }
+    }
+
+    fun clearDuplicatePlaylistState() {
+        _duplicatePlaylistState.value = DuplicatePlaylistState.Idle
     }
 
     fun clearPendingStreamingItems() {
@@ -1694,7 +1756,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             )
             enqueueDownloadRequest(request).await()
         } else {
-            repository.insertStreamingItems(listOf(item))
+            val existing = repository.getTopLevelSingleSong(item.youtubeUrl, item.title, item.artist)
+            if (existing == null) {
+                repository.insertStreamingItems(listOf(item))
+            }
             val currentStates = _itemActionStates.value.toMutableMap()
             currentStates[item.youtubeUrl] = ItemActionState.Success
             _itemActionStates.value = currentStates
@@ -1778,4 +1843,16 @@ sealed class DownloadState {
     ) : DownloadState()
     data object Success : DownloadState()
     data class Error(val message: String) : DownloadState()
+}
+
+sealed class DuplicatePlaylistState {
+    data object Idle : DuplicatePlaylistState()
+    data class AlreadyExists(val title: String) : DuplicatePlaylistState()
+    data class UpdateAvailable(
+        val existingPlaylist: StreamingItem,
+        val newHeader: StreamingItem,
+        val newTracks: List<StreamingItem>,
+        val existingCount: Int,
+        val newCount: Int
+    ) : DuplicatePlaylistState()
 }
