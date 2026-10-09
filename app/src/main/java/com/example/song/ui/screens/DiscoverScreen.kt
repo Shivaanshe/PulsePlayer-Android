@@ -938,13 +938,13 @@ fun DiscoverScreen(
                         }
 
                         Text(
-                            text = "Playlist Already Added",
+                            text = "Already in Library",
                             style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White),
                             textAlign = TextAlign.Center
                         )
 
                         Text(
-                            text = "\"${state.title}\" is already present in your library with all its songs.",
+                            text = "\"${state.title}\" is already present in your library.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = Color.White.copy(alpha = 0.8f),
                             textAlign = TextAlign.Center

@@ -339,7 +339,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     val singleSong = items.first()
                     val existing = repository.getTopLevelSingleSong(singleSong.youtubeUrl, singleSong.title, singleSong.artist)
                     if (existing != null) {
-                        _extractionError.value = "This song is already in your Recommended list."
+                        _duplicatePlaylistState.value = DuplicatePlaylistState.AlreadyExists(singleSong.title)
                     } else {
                         repository.insertStreamingItems(items)
                     }
@@ -421,7 +421,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 if (nonDuplicates.isNotEmpty()) {
                     repository.insertStreamingItems(nonDuplicates)
                 } else {
-                    _extractionError.value = "Selected song is already in your Recommended list."
+                    val firstItem = filteredItems.firstOrNull()
+                    if (firstItem != null) {
+                        _duplicatePlaylistState.value = DuplicatePlaylistState.AlreadyExists(firstItem.title)
+                    }
                 }
             }
             _pendingStreamingItems.value = emptyList()

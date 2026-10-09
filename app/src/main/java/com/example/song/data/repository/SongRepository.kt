@@ -25,6 +25,7 @@ import java.util.UUID
 import android.util.Log
 import com.example.song.SongApplication
 import com.example.song.util.YoutubeStreamHandler
+import androidx.core.content.edit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -111,6 +112,11 @@ class SongRepository(
     }
 
     suspend fun cleanUpDuplicateSingleSongs() = withContext(Dispatchers.IO) {
+        val prefs = SongApplication.getInstance().getSharedPreferences("app_migration_prefs", android.content.Context.MODE_PRIVATE)
+        if (prefs.getBoolean("has_cleaned_duplicate_streaming_songs_v1", false)) {
+            return@withContext
+        }
+
         val allSingleSongs = streamingDao.getAllTopLevelSingleSongsSync()
         val grouped = allSingleSongs.groupBy { item ->
             val keyTitle = item.title.lowercase().trim()
@@ -124,6 +130,8 @@ class SongRepository(
                 toDelete.forEach { streamingDao.deleteItem(it) }
             }
         }
+
+        prefs.edit { putBoolean("has_cleaned_duplicate_streaming_songs_v1", true) }
     }
 
     fun getItemsForStreamingPlaylist(playlistUrl: String): Flow<List<StreamingItem>> {
