@@ -72,7 +72,8 @@ class SongRepository(
         val playlistMeta = spotifyCrawlDao.getPlaylist(playlistId)
         val playlistTitle = playlistMeta?.title ?: "Spotify Playlist"
         val playlistUrl = "https://open.spotify.com/playlist/$playlistId"
-        val firstCover = tracks.firstOrNull { !it.thumbnailUrl.isNullOrEmpty() }?.thumbnailUrl ?: ""
+        val rawFirstCover = tracks.firstOrNull { !it.thumbnailUrl.isNullOrEmpty() }?.thumbnailUrl ?: ""
+        val firstCover = rawFirstCover.replace("00004851", "0000b273").replace("00001e02", "0000b273")
 
         val items = mutableListOf<StreamingItem>()
         items.add(
@@ -93,12 +94,16 @@ class SongRepository(
                 "ytsearch1:$query"
             }
 
+            val trackArt = (track.thumbnailUrl ?: firstCover)
+                .replace("00004851", "0000b273")
+                .replace("00001e02", "0000b273")
+
             items.add(
                 StreamingItem(
                     youtubeUrl = ytSearchUrl,
                     title = track.title,
                     artist = track.artists,
-                    thumbnailUrl = track.thumbnailUrl ?: firstCover,
+                    thumbnailUrl = trackArt,
                     isPlaylist = false,
                     parentPlaylistUrl = playlistUrl,
                     duration = track.durationMs ?: 0L

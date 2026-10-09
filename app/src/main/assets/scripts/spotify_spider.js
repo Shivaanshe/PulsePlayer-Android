@@ -221,7 +221,14 @@
     const album = clean(row.querySelector('a[href*="/album/"]')?.innerText);
 
     const img = row.querySelector('img[src]');
-    const thumbnailUrl = img ? (img.getAttribute('src') || img.src) : null;
+    let thumbnailUrl = img ? (img.getAttribute('src') || img.src) : null;
+
+    // Upgrade Spotify thumbnail resolution from 64x64 (00004851) to 640x640 HD (0000b273)
+    if (thumbnailUrl) {
+      thumbnailUrl = thumbnailUrl
+        .replace('00004851', '0000b273')
+        .replace('00001e02', '0000b273');
+    }
 
     const dur = (row.innerText.match(/\b(?:\d+:)?\d{1,2}:\d{2}\b/g) || []).pop();
     let durationMs = null;
