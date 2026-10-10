@@ -8,7 +8,7 @@
  * - Recommendation Boundary Filter: Excludes "Recommended / Fans also like" sections (never captures track 331)
  * - Correct Canvas Teardown Order: 60fps animation active during 600ms opacity fade-out AFTER FINISHED emission
  */
-(async function spiderCrawl(opts = {}) {
+window.spiderCrawl = async function(opts = {}) {
   // ---- Spotify Telemetry Guard --------------------------------------------
   window.addEventListener('unhandledrejection', function(e) {
     if (e && e.reason && (e.reason.message || e.reason || '').toString().includes('RejectedClientEventNonAuth')) {
@@ -189,7 +189,7 @@
 
   function parseExpected() {
     const meta = document.querySelector('meta[property="og:description"]')?.content || '';
-    const m = meta.match(/([\d][\d,.\u00a0\s]*)\s*(songs|items|tracks)/i) ||
+    const m = meta.match(/([\d][\d,.\u00a0\s]*)\s*(\p{L}+)/u) ||
               document.body.innerText.match(/([\d][\d,]*)\s+songs?\b/i);
     const n = m ? parseInt(m[1].replace(/[^\d]/g, ''), 10) : NaN;
     return n > 0 && n <= 10000 ? n : null;
@@ -240,7 +240,7 @@
     return { rowRaw: raw, rowType, spotifyId: id, title, artists, album, thumbnailUrl, durationMs };
   }
 
-  const withIndex = (r) => ({ ...r, rowIndex: base === null ? null : r.rowRaw - base });
+  const withIndex = (r) => ({ ...r, rowIndex: r.rowRaw });
 
   // ---- Canvas setup (capped DPR for optimal 60fps & delayed opacity fade-in)
   const canvas = document.createElement('canvas');
@@ -574,6 +574,7 @@
     emit({ type: 'ERROR', code: 'NO_ROWS' });
     console.warn('No tracklist rows found after 30s');
     state.done = true;
+    if (state.raf) cancelAnimationFrame(state.raf);
     window.removeEventListener('resize', fit);
     canvas.remove();
     return;
@@ -704,4 +705,9 @@
 
   console.log(`[spider] ${reason}: captured ${result.length}${expected ? ' / ' + expected : ''} in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
   return result;
-})();
+};
+
+if (!window.__SPIDER_INIT) {
+    window.__SPIDER_INIT = true;
+    window.spiderCrawl();
+}

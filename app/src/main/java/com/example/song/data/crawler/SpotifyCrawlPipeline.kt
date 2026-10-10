@@ -119,12 +119,12 @@ class SpotifyCrawlPipeline(
     var resumeFromIndex: Int = 0
         private set
 
-    fun prepareCrawl(
+    suspend fun prepareCrawl(
         playlistId: String,
         initialExpectedCount: Int? = null,
         title: String? = null,
         isResume: Boolean = false
-    ) {
+    ) = withContext(Dispatchers.IO) {
         if (consumerJob?.isActive != true) {
             startConsumer()
         }
@@ -135,48 +135,46 @@ class SpotifyCrawlPipeline(
         // Drain channel buffer to clear stale messages from prior runs
         while (messageChannel.tryReceive().isSuccess) {}
 
-        scope.launch {
-            val existing = dao.getPlaylist(playlistId)
-            val now = System.currentTimeMillis()
-            activeGeneration = (existing?.crawlGeneration ?: 0) + 1
+        val existing = dao.getPlaylist(playlistId)
+        val now = System.currentTimeMillis()
+        activeGeneration = (existing?.crawlGeneration ?: 0) + 1
 
-            if (!isResume) {
-                resumeFromIndex = 0
-                dao.clearTracksForPlaylist(playlistId)
-            } else {
-                val maxIdx = dao.getMaxCapturedIndex(playlistId)
-                resumeFromIndex = maxIdx ?: 0
-                Log.d(TAG, "Resuming crawl for $playlistId from index $resumeFromIndex")
-            }
+        if (!isResume) {
+            resumeFromIndex = 0
+            dao.clearTracksForPlaylist(playlistId)
+        } else {
+            val maxIdx = dao.getMaxCapturedIndex(playlistId)
+            resumeFromIndex = maxIdx ?: 0
+            Log.d(TAG, "Resuming crawl for $playlistId from index $resumeFromIndex")
+        }
 
-            if (existing != null) {
-                dao.updatePlaylist(
-                    existing.copy(
-                        title = title ?: existing.title,
-                        expectedCount = initialExpectedCount ?: existing.expectedCount,
-                        status = CrawlStatus.INITIALIZING,
-                        crawlGeneration = activeGeneration,
-                        updatedAt = now
-                    )
+        if (existing != null) {
+            dao.updatePlaylist(
+                existing.copy(
+                    title = title ?: existing.title,
+                    expectedCount = initialExpectedCount ?: existing.expectedCount,
+                    status = CrawlStatus.INITIALIZING,
+                    crawlGeneration = activeGeneration,
+                    updatedAt = now
                 )
-            } else {
-                dao.insertPlaylist(
-                    PlaylistEntity(
-                        playlistId = playlistId,
-                        title = title,
-                        expectedCount = initialExpectedCount,
-                        status = CrawlStatus.INITIALIZING,
-                        crawlGeneration = activeGeneration,
-                        createdAt = now,
-                        updatedAt = now
-                    )
+            )
+        } else {
+            dao.insertPlaylist(
+                PlaylistEntity(
+                    playlistId = playlistId,
+                    title = title,
+                    expectedCount = initialExpectedCount,
+                    status = CrawlStatus.INITIALIZING,
+                    crawlGeneration = activeGeneration,
+                    createdAt = now,
+                    updatedAt = now
                 )
-            }
-            val currentCaptured = if (isResume) dao.getCapturedCount(playlistId) else 0
-            _pipelineState.value = CrawlPipelineStatus.Running(
-                playlistId, currentCaptured, initialExpectedCount ?: existing?.expectedCount, CrawlStatus.INITIALIZING
             )
         }
+        val currentCaptured = if (isResume) dao.getCapturedCount(playlistId) else 0
+        _pipelineState.value = CrawlPipelineStatus.Running(
+            playlistId, currentCaptured, initialExpectedCount ?: existing?.expectedCount, CrawlStatus.INITIALIZING
+        )
     }
 
     fun stopCrawl() {

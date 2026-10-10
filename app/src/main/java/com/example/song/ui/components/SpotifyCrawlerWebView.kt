@@ -48,6 +48,7 @@ fun SpotifyCrawlerWebView(
 
     val mainHandler = remember { Handler(Looper.getMainLooper()) }
     var graceTimerRunnable by remember { mutableStateOf<Runnable?>(null) }
+    val coroutineScope = rememberCoroutineScope()
 
     // Screen protection: FLAG_KEEP_SCREEN_ON strictly when CRAWLING (PRD §5.1)
     DisposableEffect(isCrawling, activity) {
@@ -177,7 +178,7 @@ fun SpotifyCrawlerWebView(
                         val listener = WebViewCompat.WebMessageListener { _: WebView, message: WebMessageCompat, _: Uri, _: Boolean, _: JavaScriptReplyProxy ->
                             val rawData = message.data
                             if (!rawData.isNullOrEmpty()) {
-                                CoroutineScope(Dispatchers.IO).launch {
+                                coroutineScope.launch(Dispatchers.IO) {
                                     pipeline.postBridgeMessage(rawData)
                                 }
                             }
@@ -196,7 +197,7 @@ fun SpotifyCrawlerWebView(
                                     "(function(){ var q = window.__pulseQueue || []; window.__pulseQueue = []; return JSON.stringify(q); })()"
                                 ) { jsonResult ->
                                     if (!jsonResult.isNullOrEmpty() && jsonResult != "null" && jsonResult != "[]") {
-                                        CoroutineScope(Dispatchers.IO).launch {
+                                        coroutineScope.launch(Dispatchers.IO) {
                                             try {
                                                 val items = com.google.gson.Gson().fromJson(jsonResult, Array<String>::class.java)
                                                 for (item in items) {
@@ -230,7 +231,7 @@ fun SpotifyCrawlerWebView(
                         override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                             Log.e("SpotifyCrawlerWebView", "Renderer process crashed! Guarding host process...")
                             destroyWebViewSafely(view)
-                            CoroutineScope(Dispatchers.IO).launch {
+                            coroutineScope.launch(Dispatchers.IO) {
                                 pipeline.postBridgeMessage("""{"v":1,"type":"ERROR","code":"RENDERER_CRASH"}""")
                             }
                             return true // PRD §5.1: return true to keep host process alive
@@ -291,7 +292,7 @@ fun SpotifyCrawlerWebView(
                                     val resumeIdx = pipeline.resumeFromIndex
                                     Log.d("SpotifyCrawlerWebView", "DOM Hydrated. Injecting spotify_spider.js with resumeFromIndex=$resumeIdx...")
                                     val injectionCode = if (resumeIdx > 0) {
-                                        "$scriptContent\nspiderCrawl({ resumeFromIndex: $resumeIdx });"
+                                        "$scriptContent\nwindow.spiderCrawl({ resumeFromIndex: $resumeIdx });"
                                     } else {
                                         scriptContent
                                     }
@@ -309,6 +310,9 @@ fun SpotifyCrawlerWebView(
                     lastInjectedUrl = null
                     wv.loadUrl(targetUrl)
                 }
+            },
+            onRelease = { wv ->
+                destroyWebViewSafely(wv)
             }
         )
     }
