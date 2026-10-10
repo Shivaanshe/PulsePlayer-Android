@@ -291,7 +291,7 @@ window.spiderCrawl = async function(opts = {}) {
     { id: 7, side: 1,  group: 0, hip: { x: 10, y: -12 }, rest: { x: 115, y: -55 } },
   ];
 
-  const body = { x: innerWidth * 0.45, y: 220, vx: 0, vy: 0, angle: 0 };
+  const body = { x: innerWidth * 0.45, y: 100, vx: 0, vy: 0, angle: 0 };
 
   function localToWorld(lx, ly) {
     const cos = Math.cos(body.angle);
@@ -371,6 +371,16 @@ window.spiderCrawl = async function(opts = {}) {
         if (f.filter((x) => x.kind === 'artist').length >= 2) break;
       }
     }
+
+    // Add timestamp/duration element target
+    const durationDivs = [...row.querySelectorAll('div')].filter(d => {
+      const t = d.innerText || '';
+      return /^\d+:\d{2}$/.test(t.trim());
+    });
+    if (durationDivs.length > 0 && isValidField(durationDivs[0])) {
+      f.push({ el: durationDivs[0], kind: 'time' });
+    }
+
     return f;
   }
 
@@ -382,6 +392,7 @@ window.spiderCrawl = async function(opts = {}) {
     const r = targetField.el.getBoundingClientRect();
     if (r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight) {
       const colorObj = RANDOM_COLORS[Math.floor(Math.random() * RANDOM_COLORS.length)];
+
       boxes.push({
         el: targetField.el,
         x: r.left - 4,
@@ -389,16 +400,17 @@ window.spiderCrawl = async function(opts = {}) {
         w: r.width + 8,
         h: r.height + 4,
         s: colorObj,
-        life: 0.85
+        life: 2.0
       });
 
       strands.push({
+        el: targetField.el,
         x1: body.x,
         y1: body.y + 10 * S,
         x2: r.left + r.width * 0.5,
         y2: r.top + r.height * 0.5,
         color: colorObj.c,
-        life: 0.65
+        life: 2.0
       });
     }
   }
@@ -416,7 +428,7 @@ window.spiderCrawl = async function(opts = {}) {
 
     // Gentle pendulum dangle sway for rappelling spider
     body.x = (innerWidth * 0.45) + Math.sin(ts * 0.0028) * 20 * S;
-    body.y = 220 + Math.cos(ts * 0.0018) * 10 * S;
+    body.y = 100 + Math.cos(ts * 0.0018) * 10 * S;
     body.angle = Math.sin(ts * 0.0028) * 0.12;
 
     // 1. Shimmering neon silk thread hanging from ceiling to spider
@@ -438,7 +450,7 @@ window.spiderCrawl = async function(opts = {}) {
     // 2. Highlight scan boxes
     for (let i = boxes.length - 1; i >= 0; i--) {
       const b = boxes[i];
-      b.life -= dt * 2.2;
+      b.life -= dt * 1.5; // Smooth fade decay
       if (b.life <= 0) { boxes.splice(i, 1); continue; }
 
       let bx = b.x, by = b.y, bw = b.w, bh = b.h;
@@ -452,23 +464,38 @@ window.spiderCrawl = async function(opts = {}) {
 
       if (by + bh < -10 || by > innerHeight + 10) continue;
 
-      const a = Math.min(1, b.life);
-      ctx.fillStyle = `rgba(${b.s.c[0]},${b.s.c[1]},${b.s.c[2]},${a * b.s.fill})`;
+      const a = Math.max(0, Math.min(1, b.life));
+      // Use a very light opacity (0.15) for the background so text remains visible
+      ctx.fillStyle = `rgba(${b.s.c[0]},${b.s.c[1]},${b.s.c[2]},${a * 0.15})`;
       ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = `rgba(${b.s.c[0]},${b.s.c[1]},${b.s.c[2]},${a * 0.95})`;
-      ctx.lineWidth = 1.4;
+      // Keep the border crisp
+      ctx.strokeStyle = `rgba(${b.s.c[0]},${b.s.c[1]},${b.s.c[2]},${a * 0.8})`;
+      ctx.lineWidth = 1.5;
       ctx.strokeRect(bx, by, bw, bh);
     }
 
     // 3. Neon laser scan threads
     for (let i = strands.length - 1; i >= 0; i--) {
       const s = strands[i];
-      s.life -= dt * 3.2;
+      s.life -= dt * 1.0;
       if (s.life <= 0) { strands.splice(i, 1); continue; }
 
+      // Dynamically update the thread target if the element is moving
+      if (s.el && s.el.isConnected) {
+        const fresh = s.el.getBoundingClientRect();
+        s.x2 = fresh.left + fresh.width * 0.5;
+        s.y2 = fresh.top + fresh.height * 0.5;
+      }
+
+      // Visual Boundary Cutoff: Snip the thread if the text scrolls above the spider's body
+      if (s.y2 < body.y) {
+        strands.splice(i, 1);
+        continue;
+      }
+
       const c = s.color || [0, 240, 255];
-      ctx.strokeStyle = `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${s.life * 0.85})`;
-      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${Math.min(1, s.life)})`;
+      ctx.lineWidth = 2.0;
       ctx.beginPath();
       ctx.moveTo(body.x, body.y + 10 * S);
       ctx.lineTo(s.x2, s.y2);
@@ -627,6 +654,9 @@ window.spiderCrawl = async function(opts = {}) {
 
         // Flash random neon scan box on newly parsed track
         flashNeonBox(row);
+
+        // Micro-delay to sync extraction with 60fps canvas (prevents 25-box chunking)
+        await sleep(15);
       }
 
       if (newlyFound.length && base === null) {

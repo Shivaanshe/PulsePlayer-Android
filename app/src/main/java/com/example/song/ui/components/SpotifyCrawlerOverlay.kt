@@ -161,20 +161,26 @@ fun SpotifyCrawlerOverlay(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 // Expanded Prominent Viewport for Visual Spider Crawler
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(Color.Black)
-                        .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
+                AnimatedVisibility(
+                    visible = isWebVisible,
+                    enter = fadeIn() + expandVertically(),
+                    exit = fadeOut() + shrinkVertically(),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    SpotifyCrawlerWebView(
-                        targetUrl = targetUrl,
-                        pipeline = pipeline,
-                        isCrawling = isCrawling,
-                        onFinished = {}
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Color.Black)
+                            .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
+                    ) {
+                        SpotifyCrawlerWebView(
+                            targetUrl = targetUrl,
+                            pipeline = pipeline,
+                            isCrawling = isCrawling,
+                            onFinished = {}
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
