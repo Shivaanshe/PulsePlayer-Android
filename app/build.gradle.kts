@@ -17,8 +17,8 @@ android {
         applicationId = "com.shivaansh.pulseplayer"
         minSdk = 26
         targetSdk = 35
-        versionCode = 10
-        versionName = "3.4.45"
+        versionCode = 11
+        versionName = "3.4.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         
