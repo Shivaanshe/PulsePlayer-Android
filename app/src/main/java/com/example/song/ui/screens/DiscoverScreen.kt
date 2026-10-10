@@ -126,7 +126,10 @@ fun DiscoverScreen(
     val singleSongs = remember(filteredItems) { filteredItems.filter { !it.isPlaylist } }
     val isSelectionMode by viewModel.isSelectionMode.collectAsState()
     val selectedStreamingIds by viewModel.selectedStreamingIds.collectAsState()
-    val isUrlValid = remember(youtubeUrl) { youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be") || youtubeUrl.contains("spotify.com"))) }
+    val isUrlValid = remember(youtubeUrl) {
+        val trimmed = youtubeUrl.trim()
+        trimmed.isBlank() || (trimmed.startsWith("http") && (trimmed.contains("youtube.com") || trimmed.contains("youtu.be") || trimmed.contains("spotify.com")))
+    }
     val addIconRotation by animateFloatAsState(targetValue = if (showAddMenu) 135f else 0f, animationSpec = spring(stiffness = Spring.StiffnessLow), label = "AddIconRotation")
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -721,7 +724,7 @@ fun DiscoverScreen(
                                 onValueChange = { youtubeUrl = it },
                                 placeholder = { Text("https://youtube.com/...", color = Color.White.copy(alpha = 0.4f)) },
                                 singleLine = true,
-                                isError = (!isUrlValid && youtubeUrl.isNotBlank()) || extractionError != null,
+                                isError = (!isUrlValid && youtubeUrl.trim().isNotBlank()) || extractionError != null,
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedContainerColor = Color.Black.copy(alpha = 0.40f),
                                     unfocusedContainerColor = Color.Black.copy(alpha = 0.25f),
@@ -733,7 +736,7 @@ fun DiscoverScreen(
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            if (!isUrlValid && youtubeUrl.isNotBlank()) {
+                            if (!isUrlValid && youtubeUrl.trim().isNotBlank()) {
                                 Text("Invalid URL (YouTube or Spotify only)", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(top = 4.dp, start = 8.dp))
                             }
                             extractionError?.let { error ->
@@ -746,14 +749,14 @@ fun DiscoverScreen(
                     if (!isExtracting) {
                         Button(
                             onClick = {
-                                if (youtubeUrl.isNotBlank() && isUrlValid && isEngineReady) {
-                                    val urlToAdd = youtubeUrl.trim()
+                                val urlToAdd = youtubeUrl.trim()
+                                if (urlToAdd.isNotBlank() && isUrlValid && isEngineReady) {
                                     youtubeUrl = ""
                                     viewModel.fetchStreamingMetadata(urlToAdd)
                                     showAddDialog = false
                                 }
                             },
-                            enabled = youtubeUrl.isNotBlank() && isUrlValid && isEngineReady,
+                            enabled = youtubeUrl.trim().isNotBlank() && isUrlValid && isEngineReady,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF00E676),
                                 contentColor = Color.Black,

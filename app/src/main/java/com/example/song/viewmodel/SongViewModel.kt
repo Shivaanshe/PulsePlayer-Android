@@ -195,11 +195,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     val activeSpotifyCrawlUrl: StateFlow<String?> = _activeSpotifyCrawlUrl.asStateFlow()
 
     fun startSpotifyCrawl(url: String) {
+        val trimmedUrl = url.trim()
         viewModelScope.launch {
             try {
                 _isExtracting.value = true
                 _extractionStatus.value = "Preflighting Spotify Playlist..."
-                val preflight = repository.spotifyCrawlPipeline.sanitizeAndPreflight(url)
+                val preflight = repository.spotifyCrawlPipeline.sanitizeAndPreflight(trimmedUrl)
 
                 if (preflight.route == com.example.song.data.crawler.SpotifyCrawlPipeline.PreflightRoute.UNAVAILABLE) {
                     _extractionError.value = "Spotify Playlist Unavailable or Deleted"
@@ -394,28 +395,29 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun fetchStreamingMetadata(url: String) {
+        val trimmedUrl = url.trim()
         viewModelScope.launch {
             if (!isConnectedToInternet()) {
                 _extractionError.value = "App is offline. Please check your Internet connection."
                 return@launch
             }
 
-            if (url.contains("spotify.com/playlist") || url.contains("spotify.link") || url.contains("spotify:playlist:")) {
-                startSpotifyCrawl(url)
+            if (trimmedUrl.contains("spotify.com/playlist") || trimmedUrl.contains("spotify.link") || trimmedUrl.contains("spotify:playlist:")) {
+                startSpotifyCrawl(trimmedUrl)
                 return@launch
             }
 
             _isExtracting.value = true
             _extractionError.value = null
             _extractionProgress.value = 0.15f
-            _extractionStatus.value = if (url.contains("spotify.com")) {
+            _extractionStatus.value = if (trimmedUrl.contains("spotify.com")) {
                 "Resolving Spotify track metadata..."
-            } else if (url.contains("/playlist") || url.contains("list=")) {
+            } else if (trimmedUrl.contains("/playlist") || trimmedUrl.contains("list=")) {
                 "Fetching YouTube playlist stream info..."
             } else {
                 "Connecting to media link..."
             }
-            PulseLogger.log("Searching URL: $url")
+            PulseLogger.log("Searching URL: $trimmedUrl")
 
             val tickerJob = viewModelScope.launch {
                 delay(300)
@@ -430,26 +432,26 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             try {
-                val items = if (url.contains("spotify.com")) {
-                    SpotifyResolver.resolve(url, repository)
+                val items = if (trimmedUrl.contains("spotify.com")) {
+                    SpotifyResolver.resolve(trimmedUrl, repository)
                 } else {
-                    YoutubeStreamHandler.getMetadata(url)
+                    YoutubeStreamHandler.getMetadata(trimmedUrl)
                 }
                 
                 tickerJob.cancel()
                 _extractionProgress.value = 0.95f
-                Log.d("SongViewModel", "Extraction results for $url: ${items.size} items")
+                Log.d("SongViewModel", "Extraction results for $trimmedUrl: ${items.size} items")
                 PulseLogger.log("Found ${items.size} items for extraction.")
                 _extractionStatus.value = "Found ${items.size} track${if (items.size > 1) "s" else ""}! Finalizing..."
                 _extractionProgress.value = 1.00f
                 delay(350)
                 
                 if (items.isEmpty()) {
-                    _extractionError.value = if (url.contains("spotify.com")) "Could not find this track on YouTube" else "No videos found in this URL"
+                    _extractionError.value = if (trimmedUrl.contains("spotify.com")) "Could not find this track on YouTube" else "No videos found in this URL"
                     return@launch
                 }
 
-                val isCollection = items.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
+                val isCollection = items.any { it.isPlaylist } || trimmedUrl.contains("/playlist/") || trimmedUrl.contains("/album/") || trimmedUrl.contains("list=")
                 
                 if (items.size == 1 && !isCollection) {
                     val singleSong = items.first()
@@ -1585,6 +1587,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun fetchDownloadMetadata(url: String) {
+        val trimmedUrl = url.trim()
         viewModelScope.launch {
             if (!isConnectedToInternet()) {
                 _downloadState.value = DownloadState.Error("App is offline. Please check your Internet connection.")
@@ -1593,15 +1596,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 return@launch
             }
             _downloadState.value = DownloadState.Checking
-            PulseLogger.log("Searching download: $url")
+            PulseLogger.log("Searching download: $trimmedUrl")
             try {
-                val sanitizedUrl = if (url.contains("youtube.com") && url.contains("list=")) {
-                    val listId = url.substringAfter("list=").substringBefore("&")
+                val sanitizedUrl = if (trimmedUrl.contains("youtube.com") && trimmedUrl.contains("list=")) {
+                    val listId = trimmedUrl.substringAfter("list=").substringBefore("&")
                     "https://www.youtube.com/playlist?list=$listId"
-                } else url
+                } else trimmedUrl
 
-                val items = if (url.contains("spotify.com")) {
-                    SpotifyResolver.resolve(url, repository)
+                val items = if (trimmedUrl.contains("spotify.com")) {
+                    SpotifyResolver.resolve(trimmedUrl, repository)
                 } else {
                     YoutubeStreamHandler.getMetadata(sanitizedUrl)
                 }
@@ -1823,9 +1826,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         overrideArtist: String? = null,
         overrideImageUrl: String? = null
     ) {
+        val trimmedUrl = url.trim()
         viewModelScope.launch {
             val request = DownloadRequest(
-                url = url,
+                url = trimmedUrl,
                 isLibrary = true,
                 overrideTitle = overrideTitle,
                 overrideArtist = overrideArtist,

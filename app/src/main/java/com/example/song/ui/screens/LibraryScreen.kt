@@ -93,7 +93,8 @@ fun LibraryScreen(
     var newPlaylistName by remember { mutableStateOf("") }
     var youtubeUrl by remember { mutableStateOf("") }
     val isUrlValid = remember(youtubeUrl) { 
-        youtubeUrl.isBlank() || (youtubeUrl.startsWith("http") && (youtubeUrl.contains("youtube.com") || youtubeUrl.contains("youtu.be") || youtubeUrl.contains("spotify.com")))
+        val trimmed = youtubeUrl.trim()
+        trimmed.isBlank() || (trimmed.startsWith("http") && (trimmed.contains("youtube.com") || trimmed.contains("youtu.be") || trimmed.contains("spotify.com")))
     }
     val addIconRotation by animateFloatAsState(targetValue = if (showAddMenu) 135f else 0f, animationSpec = spring(stiffness = Spring.StiffnessLow), label = "AddIconRotation")
     val context = LocalContext.current
@@ -535,7 +536,7 @@ fun LibraryScreen(
                                 onValueChange = { youtubeUrl = it },
                                 placeholder = { Text("https://youtube.com/...", color = Color.White.copy(alpha = 0.4f)) },
                                 singleLine = true,
-                                isError = !isUrlValid && youtubeUrl.isNotBlank(),
+                                isError = !isUrlValid && youtubeUrl.trim().isNotBlank(),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedContainerColor = Color.Black.copy(alpha = 0.40f),
                                     unfocusedContainerColor = Color.Black.copy(alpha = 0.25f),
@@ -547,7 +548,7 @@ fun LibraryScreen(
                                 shape = RoundedCornerShape(16.dp),
                                 modifier = Modifier.fillMaxWidth()
                             )
-                            if (!isUrlValid && youtubeUrl.isNotBlank()) {
+                            if (!isUrlValid && youtubeUrl.trim().isNotBlank()) {
                                 Text("Invalid YouTube URL", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, modifier = Modifier.align(Alignment.Start).padding(top = 4.dp, start = 8.dp))
                             }
                             if (downloadState is DownloadState.Error) {
@@ -564,14 +565,14 @@ fun LibraryScreen(
                     } else {
                         Button(
                             onClick = {
-                                if (youtubeUrl.isNotBlank() && isUrlValid && isEngineReady) {
-                                    val urlToDownload = youtubeUrl.trim()
+                                val urlToDownload = youtubeUrl.trim()
+                                if (urlToDownload.isNotBlank() && isUrlValid && isEngineReady) {
                                     youtubeUrl = ""
                                     viewModel.fetchDownloadMetadata(urlToDownload)
                                     showDownloadDialog = false
                                 }
                             },
-                            enabled = youtubeUrl.isNotBlank() && isUrlValid && isEngineReady,
+                            enabled = youtubeUrl.trim().isNotBlank() && isUrlValid && isEngineReady,
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF00E676),
                                 contentColor = Color.Black,
