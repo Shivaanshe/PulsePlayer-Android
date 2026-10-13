@@ -444,6 +444,8 @@ class SongRepository(
                 addOption("--yes-playlist")
                 addOption("--playlist-items", "1")
                 addOption("--no-cache-dir")
+                addOption("--extractor-args", "youtube:player-client=android,web")
+                addOption("--sleep-requests", "2")
             }
             
             val videoInfo: VideoInfo = try {
@@ -467,6 +469,8 @@ class SongRepository(
                 addOption("--yes-playlist")
                 addOption("--playlist-items", "1")
                 addOption("--no-cache-dir") // Disable cache to prevent old video data reuse
+                addOption("--extractor-args", "youtube:player-client=android,web")
+                addOption("--sleep-requests", "2")
             }
 
             // Perform download
