@@ -2,6 +2,7 @@ package com.example.song.viewmodel
 
 import android.app.Application
 import android.util.Log
+import android.widget.Toast
 import android.content.ComponentName
 import android.content.Context
 import android.net.ConnectivityManager
@@ -38,6 +39,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -1752,7 +1754,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun onRequestFailed(request: DownloadRequest, e: Exception) {
+    private suspend fun onRequestFailed(request: DownloadRequest, e: Exception) {
         val states = _itemActionStates.value.toMutableMap()
         states.remove(request.url)
         _itemActionStates.value = states
@@ -1769,6 +1771,16 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     "override_title" to (request.overrideTitle ?: "none")
                 )
             )
+
+            val songTitle = request.overrideTitle ?: "Song"
+            withContext(Dispatchers.Main) {
+                Toast.makeText(
+                    getApplication(),
+                    "Failed to download $songTitle: Not available or blocked.",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+
             val isOffline = !isConnectedToInternet() ||
                            e is UnknownHostException ||
                            (e.localizedMessage?.contains("Unable to resolve host", ignoreCase = true) == true) ||
