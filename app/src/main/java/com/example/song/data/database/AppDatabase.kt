@@ -90,7 +90,12 @@ abstract class AppDatabase : RoomDatabase() {
 
         val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                db.execSQL("ALTER TABLE `playlist_tracks` ADD COLUMN `thumbnailUrl` TEXT")
+                try {
+                    db.execSQL("ALTER TABLE `playlist_tracks` ADD COLUMN `thumbnailUrl` TEXT")
+                } catch (e: android.database.sqlite.SQLiteException) {
+                    // Column already exists, safe to ignore
+                    android.util.Log.w("RoomMigration", "Column thumbnailUrl already exists in playlist_tracks, skipping.", e)
+                }
             }
         }
 
