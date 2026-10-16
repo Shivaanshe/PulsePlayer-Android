@@ -361,6 +361,11 @@ class MusicService : MediaSessionService() {
             .setSessionActivity(sessionActivityPendingIntent)
             .setCallback(MediaSessionCallback())
             .build()
+
+        try {
+            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancel(FOREGROUND_NOTIFICATION_ID)
+        } catch (_: Exception) {}
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {

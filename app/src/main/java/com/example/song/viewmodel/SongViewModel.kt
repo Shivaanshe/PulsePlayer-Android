@@ -1906,6 +1906,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     _downloadState.value = DownloadState.Downloading(0f, currentIndex, currentTotal)
                     updateDownloadNotification("Downloading ($currentIndex/$currentTotal)", songTitle)
 
+                    var lastUpdateTime = 0L
+
                     repository.downloadYouTubeAudio(
                         url = request.url,
                         playlistId = request.playlistId,
@@ -1917,8 +1919,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         val sizeStr = sizeMatch?.groupValues?.get(1) ?: ""
 
                         _downloadState.value = DownloadState.Downloading(progress, currentIndex, currentTotal)
-                        val pText = if (sizeStr.isNotBlank()) "${progress.toInt()}% of $sizeStr" else "${progress.toInt()}%"
-                        updateDownloadNotification("Downloading ($currentIndex/$currentTotal)", "$songTitle ($pText)")
+
+                        val currentTime = System.currentTimeMillis()
+                        if (currentTime - lastUpdateTime > 500 || progress >= 100f) {
+                            lastUpdateTime = currentTime
+                            val pText = if (sizeStr.isNotBlank()) "${progress.toInt()}% of $sizeStr" else "${progress.toInt()}%"
+                            updateDownloadNotification("Downloading ($currentIndex/$currentTotal)", "$songTitle ($pText)")
+                        }
                     }
 
                     _downloadState.value = DownloadState.Downloading(100f, currentIndex, currentTotal)
