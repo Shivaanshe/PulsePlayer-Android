@@ -511,6 +511,25 @@ class SongRepository(
                 }
                 Log.d("SongRepository", "Download finished. Exit code: ${response.exitCode}")
             } catch (e: Exception) {
+                if (e is CancellationException || 
+                    e.javaClass.simpleName.contains("CanceledException", ignoreCase = true) || 
+                    e.message?.contains("cancel", ignoreCase = true) == true) {
+                    
+                    val musicDir = File(baseDir, "DownloadedMusic")
+                    if (musicDir.exists()) {
+                        val tempFiles = musicDir.listFiles { _, name -> name.contains(requestId) }
+                        tempFiles?.forEach { file ->
+                            try {
+                                if (file.exists() && !file.delete()) {
+                                    file.deleteOnExit()
+                                }
+                            } catch (_: Exception) {}
+                        }
+                    }
+                    
+                    throw CancellationException("Download paused/cancelled")
+                }
+                
                 Log.e("SongRepository", "Execution failed", e)
                 throw Exception("Download failed: ${e.message}")
             }
