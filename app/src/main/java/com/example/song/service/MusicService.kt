@@ -386,12 +386,18 @@ class MusicService : MediaSessionService() {
     override fun onDestroy() {
         saveCurrentState(synchronous = true)
         
-        // 3. CRITICAL: In Media3, you MUST release the MediaSession BEFORE the player.
-        mediaSession?.release()
-        mediaSession = null
-        
-        if (::player.isInitialized) {
-            player.release()
+        try {
+            mediaSession?.run {
+                player.stop()
+                release()
+            }
+            mediaSession = null
+            
+            if (::player.isInitialized) {
+                player.release()
+            }
+        } catch (e: Exception) {
+            Log.e("MusicService", "Handled exception during service destruction", e)
         }
         
         serviceScope.cancel()

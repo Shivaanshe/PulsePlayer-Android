@@ -455,6 +455,8 @@ class SongRepository(
         val musicDir = File(baseDir, "DownloadedMusic")
         if (!musicDir.exists()) musicDir.mkdirs()
 
+        var createdFinalFile: File? = null
+
         try {
             Log.d("SongRepository", "Starting download for URL: $url")
             
@@ -524,7 +526,7 @@ class SongRepository(
                     break
                 }
             }
-            
+
             if (downloadedFile != null && downloadedFile.exists()) {
                 Log.d("SongRepository", "Success! File found: ${downloadedFile.absolutePath}")
                 
@@ -541,6 +543,7 @@ class SongRepository(
                 }
                 
                 val songId = if (downloadedFile.renameTo(finalFile)) {
+                    createdFinalFile = finalFile
                     val song = Song(
                         title = overrideTitle ?: videoInfo.title ?: finalFile.nameWithoutExtension,
                         artist = overrideArtist ?: videoInfo.uploader ?: "YouTube",
@@ -550,6 +553,7 @@ class SongRepository(
                     )
                     insertSong(song)
                 } else {
+                    createdFinalFile = downloadedFile
                     val song = Song(
                         title = overrideTitle ?: videoInfo.title ?: downloadedFile.nameWithoutExtension,
                         artist = overrideArtist ?: videoInfo.uploader ?: "YouTube",
@@ -562,7 +566,11 @@ class SongRepository(
 
                 // Link to playlist if requested
                 if (playlistId != null) {
-                    addSongToPlaylist(songId, playlistId)
+                    try {
+                        addSongToPlaylist(songId, playlistId)
+                    } catch (e: Exception) {
+                        Log.w("SongRepository", "Playlist $playlistId was deleted during download; track saved to library.", e)
+                    }
                 }
             } else {
                 val existingFiles = musicDir.list()?.joinToString(", ") ?: "none"
@@ -573,6 +581,13 @@ class SongRepository(
             Log.e("SongRepository", "General error during download", e)
             val tempFiles = musicDir.listFiles { _, name -> name.contains(requestId) }
             tempFiles?.forEach { file ->
+                try {
+                    if (file.exists() && !file.delete()) {
+                        file.deleteOnExit()
+                    }
+                } catch (_: Exception) {}
+            }
+            createdFinalFile?.let { file ->
                 try {
                     if (file.exists() && !file.delete()) {
                         file.deleteOnExit()
