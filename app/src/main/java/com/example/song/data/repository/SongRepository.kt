@@ -461,7 +461,7 @@ class SongRepository(
         overrideTitle: String? = null,
         overrideArtist: String? = null,
         overrideImageUrl: String? = null,
-        progressCallback: (Float, Long) -> Unit
+        progressCallback: (Float, Long, String) -> Unit
     ) = withContext(Dispatchers.IO) {
         val requestId = UUID.randomUUID().toString()
         currentRequestId = requestId
@@ -521,7 +521,7 @@ class SongRepository(
             try {
                 val response = YoutubeDL.getInstance().execute(downloadRequest, requestId) { progress, eta, line ->
                     Log.d("SongRepository", "Progress: $progress, ETA: $eta, Line: $line")
-                    progressCallback(progress, eta)
+                    progressCallback(progress, eta, line)
                 }
                 Log.d("SongRepository", "Download finished. Exit code: ${response.exitCode}")
             } catch (e: Exception) {
@@ -611,6 +611,8 @@ class SongRepository(
                 throw Exception("Downloaded file not found in Music folder")
             }
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
+
             Log.e("SongRepository", "General error during download", e)
             val tempFiles = musicDir.listFiles { _, name -> name.contains(requestId) }
             tempFiles?.forEach { file ->

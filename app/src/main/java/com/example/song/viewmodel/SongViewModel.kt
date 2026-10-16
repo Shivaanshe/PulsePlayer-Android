@@ -42,8 +42,10 @@ import com.example.song.util.SpotifyResolver
 import com.example.song.util.YoutubeStreamHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
@@ -88,8 +90,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private var lastSentTimelineIds = listOf<Int>()
     private var isPreparingNewSession = false
 
-    private val _queueState = MutableStateFlow(QueueState.IDLE)
     val queueState: StateFlow<QueueState> = _queueState.asStateFlow()
+    val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
 
     private val _uiEvent = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val uiEvent: SharedFlow<String> = _uiEvent.asSharedFlow()
@@ -278,9 +280,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
-    val downloadState: StateFlow<DownloadState> = _downloadState.asStateFlow()
 
     private val _topLevelStreamingItems = MutableStateFlow<List<StreamingItem>>(emptyList())
     val topLevelStreamingItems: StateFlow<List<StreamingItem>> = _topLevelStreamingItems.asStateFlow()
@@ -1793,11 +1792,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Queue management for sequential downloads
-    private val downloadQueue = ConcurrentLinkedDeque<DownloadRequest>()
-    private val activeDownloadUrls = Collections.synchronizedSet(mutableSetOf<String>())
-    private var queueWorkerJob: Job? = null
-
     fun pauseDownload() {
         if (_queueState.value == QueueState.DOWNLOADING) {
             _queueState.value = QueueState.PAUSED
@@ -1821,18 +1815,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun cancelDownload() {
-        downloadQueue.clear()
-        synchronized(activeDownloadUrls) {
-            activeDownloadUrls.clear() // Force clear to prevent zombie locks
-        }
-        repository.cancelDownload()
-        queueWorkerJob?.cancel()
-        queueWorkerJob = null
-        _queueState.value = QueueState.IDLE
-        _downloadState.value = DownloadState.Idle
+        downloadQueue.clear() // Clear upcoming songs
+        // DO NOT call repository.cancelDownload() so the active track finishes gracefully!
         cancelDownloadNotification()
         viewModelScope.launch {
-            _uiEvent.emit("Download cancelled.")
+            _uiEvent.emit("Queue cleared. Current song will finish downloading peacefully.")
         }
     }
 
@@ -1866,7 +1853,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
         _queueState.value = QueueState.DOWNLOADING
 
-        queueWorkerJob = viewModelScope.launch(Dispatchers.IO) {
+        queueWorkerJob = downloadScope.launch {
             var completedCount = 0
 
             while (isActive && _queueState.value != QueueState.IDLE) {
@@ -1877,6 +1864,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
                 val request = downloadQueue.poll()
                 if (request == null) break
+
+                synchronized(activeDownloadUrls) {
+                    activeDownloadUrls.add(request.url.trim())
+                }
 
                 // Network check loop
                 while (!isConnectedToInternet() && isActive && _queueState.value != QueueState.IDLE) {
@@ -1921,9 +1912,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         overrideTitle = request.overrideTitle,
                         overrideArtist = request.overrideArtist,
                         overrideImageUrl = request.overrideImageUrl
-                    ) { progress, _ ->
+                    ) { progress, _, line ->
+                        val sizeMatch = Regex("of\\s+(.*?\\wB)").find(line)
+                        val sizeStr = sizeMatch?.groupValues?.get(1) ?: ""
+
                         _downloadState.value = DownloadState.Downloading(progress, currentIndex, currentTotal)
-                        updateDownloadNotification("Downloading ($currentIndex/$currentTotal)", "$songTitle (${progress.toInt()}%)")
+                        val pText = if (sizeStr.isNotBlank()) "${progress.toInt()}% of $sizeStr" else "${progress.toInt()}%"
+                        updateDownloadNotification("Downloading ($currentIndex/$currentTotal)", "$songTitle ($pText)")
                     }
 
                     _downloadState.value = DownloadState.Downloading(100f, currentIndex, currentTotal)
@@ -2210,6 +2205,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         private const val ACTION_STOP_DOWNLOAD = "com.example.song.ACTION_STOP_DOWNLOAD"
         private const val ACTION_PAUSE_DOWNLOAD = "com.example.song.ACTION_PAUSE_DOWNLOAD"
         private const val ACTION_RESUME_DOWNLOAD = "com.example.song.ACTION_RESUME_DOWNLOAD"
+
+        val downloadQueue = ConcurrentLinkedDeque<DownloadRequest>()
+        val activeDownloadUrls = Collections.synchronizedSet(mutableSetOf<String>())
+        val _queueState = MutableStateFlow(QueueState.IDLE)
+        val _downloadState = MutableStateFlow<DownloadState>(DownloadState.Idle)
+        var queueWorkerJob: Job? = null
+        val downloadScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     }
 }
 
