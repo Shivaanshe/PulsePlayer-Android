@@ -17,6 +17,7 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.datasource.*
 import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
@@ -236,16 +237,7 @@ class MusicService : MediaSessionService() {
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
             .build()
 
-        val renderersFactory = RenderersFactory { handler, _, audioListener, _, _ ->
-            arrayOf(
-                MediaCodecAudioRenderer(
-                    this,
-                    MediaCodecSelector.DEFAULT,
-                    handler,
-                    audioListener
-                )
-            )
-        }
+        val renderersFactory = DefaultRenderersFactory(this)
 
         player = ExoPlayer.Builder(this, renderersFactory)
             .setMediaSourceFactory(dataSourceFactory)
@@ -348,6 +340,16 @@ class MusicService : MediaSessionService() {
                         "media_id" to (currentMediaItem?.mediaId ?: "unknown")
                     )
                 )
+
+                if (player.hasNextMediaItem()) {
+                    PulseLogger.log("Skipping unplayable track to next item")
+                    player.seekToNextMediaItem()
+                    player.prepare()
+                    player.play()
+                } else {
+                    PulseLogger.log("Playback error on final track of playlist. Stopping player gracefully.")
+                    player.stop()
+                }
             }
         })
 

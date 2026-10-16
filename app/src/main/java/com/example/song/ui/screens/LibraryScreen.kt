@@ -221,17 +221,35 @@ fun LibraryScreen(
                                                 color = Color(0xFFE91E63),
                                                 trackColor = Color.White.copy(alpha = 0.1f)
                                             )
-                                            val progressText = if (state.total > 1) {
-                                                "Batch Download: ${state.current} of ${state.total} (${state.progress.toInt()}%)"
-                                            } else {
-                                                "Downloading... ${state.progress.toInt()}%"
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(top = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                val progressText = if (state.total > 1) {
+                                                    "Batch Download: ${state.current} of ${state.total} (${state.progress.toInt()}%)"
+                                                } else {
+                                                    "Downloading... ${state.progress.toInt()}%"
+                                                }
+                                                Text(
+                                                    text = progressText,
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = Color.White
+                                                )
+                                                IconButton(
+                                                    onClick = { viewModel.cancelDownload() },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Close,
+                                                        contentDescription = "Cancel Download",
+                                                        tint = Color.White.copy(alpha = 0.7f),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
                                             }
-                                            Text(
-                                                text = progressText,
-                                                modifier = Modifier.padding(top = 8.dp),
-                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                                color = Color.White
-                                            )
                                         }
                                         is DownloadState.Success -> {
                                             LinearProgressIndicator(
@@ -254,12 +272,64 @@ fun LibraryScreen(
                                                 color = Color(0xFFF44336),
                                                 trackColor = Color.White.copy(alpha = 0.1f)
                                             )
-                                            Text(
-                                                text = state.message,
-                                                modifier = Modifier.padding(top = 8.dp),
-                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                                color = Color(0xFFF44336)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(top = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = state.message,
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = Color(0xFFF44336),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                IconButton(
+                                                    onClick = { viewModel.resetDownloadState() },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Close,
+                                                        contentDescription = "Dismiss",
+                                                        tint = Color.White.copy(alpha = 0.7f),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        is DownloadState.Paused -> {
+                                            LinearProgressIndicator(
+                                                progress = { 0.5f },
+                                                modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                                color = Color(0xFFFFC107),
+                                                trackColor = Color.White.copy(alpha = 0.1f)
                                             )
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(top = 8.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = "Download Paused",
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = Color(0xFFFFC107),
+                                                    modifier = Modifier.weight(1f)
+                                                )
+                                                IconButton(
+                                                    onClick = { viewModel.resumeDownload() },
+                                                    modifier = Modifier.size(24.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.PlayArrow,
+                                                        contentDescription = "Resume Download",
+                                                        tint = Color.White.copy(alpha = 0.7f),
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
                                         }
                                         is DownloadState.Idle -> {}
                                     }

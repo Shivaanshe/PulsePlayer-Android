@@ -52,4 +52,10 @@ interface PlaylistDao {
 
     @Query("SELECT songId FROM playlist_song_cross_ref")
     fun getAllSongIdsInPlaylists(): Flow<List<Int>>
+
+    @Query("SELECT songId FROM playlist_song_cross_ref WHERE playlistId = :playlistId")
+    suspend fun getSongIdsForPlaylist(playlistId: Int): List<Int>
+
+    @Query("SELECT songId FROM playlist_song_cross_ref WHERE playlistId != :playlistId")
+    suspend fun getAllSongIdsInOtherPlaylists(playlistId: Int): List<Int>
 }

@@ -55,6 +55,15 @@
             </intent-filter>
         </receiver>
 
+        <receiver android:name="com.example.song.receiver.DownloadActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.example.song.ACTION_STOP_DOWNLOAD" />
+                <action android:name="com.example.song.ACTION_PAUSE_DOWNLOAD" />
+                <action android:name="com.example.song.ACTION_RESUME_DOWNLOAD" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

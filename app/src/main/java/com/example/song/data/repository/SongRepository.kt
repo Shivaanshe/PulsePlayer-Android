@@ -345,6 +345,22 @@ class SongRepository(
     }
 
     suspend fun deletePlaylist(playlistId: Int) {
+        val songIds = playlistDao.getSongIdsForPlaylist(playlistId)
+        val otherSongIds = playlistDao.getAllSongIdsInOtherPlaylists(playlistId).toSet()
+
+        for (songId in songIds) {
+            if (!otherSongIds.contains(songId)) {
+                val song = songDao.getSongByIdSync(songId)
+                if (song != null) {
+                    try {
+                        val file = File(song.audioUri)
+                        if (file.exists()) file.delete()
+                    } catch (_: Exception) {}
+                    songDao.deleteSong(songId)
+                }
+            }
+        }
+
         playlistDao.deletePlaylistWithCrossRefs(playlistId)
     }
 
@@ -402,15 +418,27 @@ class SongRepository(
     }
 
     fun cancelDownload() {
-        currentRequestId?.let { 
+        currentRequestId?.let { reqId ->
             try {
-                YoutubeStreamHandler.cancelProcess(it)
+                YoutubeStreamHandler.cancelProcess(reqId)
             } catch (e: Exception) {
                 e.printStackTrace()
+            }
+            val musicDir = File(baseDir, "DownloadedMusic")
+            if (musicDir.exists()) {
+                val tempFiles = musicDir.listFiles { _, name -> name.contains(reqId) }
+                tempFiles?.forEach { file ->
+                    try {
+                        if (file.exists() && !file.delete()) {
+                            file.deleteOnExit()
+                        }
+                    } catch (_: Exception) {}
+                }
             }
         }
         downloadJob?.cancel()
         downloadJob = null
+        currentRequestId = null
     }
 
     suspend fun downloadYouTubeAudio(
@@ -543,10 +571,12 @@ class SongRepository(
             }
         } catch (e: Exception) {
             Log.e("SongRepository", "General error during download", e)
-            val tempFiles = musicDir.listFiles { _, name -> name.startsWith(requestId) }
+            val tempFiles = musicDir.listFiles { _, name -> name.contains(requestId) }
             tempFiles?.forEach { file ->
                 try {
-                    if (file.exists()) file.delete()
+                    if (file.exists() && !file.delete()) {
+                        file.deleteOnExit()
+                    }
                 } catch (_: Exception) {}
             }
             throw e

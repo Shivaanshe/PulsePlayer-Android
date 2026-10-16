@@ -159,6 +159,13 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
     val context = LocalContext.current
+
+    LaunchedEffect(viewModel.uiEvent) {
+        viewModel.uiEvent.collect { message ->
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        }
+    }
+
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentDestination = navBackStackEntry?.destination

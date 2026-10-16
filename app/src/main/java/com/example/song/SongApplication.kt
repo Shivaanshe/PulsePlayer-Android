@@ -93,6 +93,9 @@ class SongApplication : Application(), ImageLoaderFactory {
     companion object {
         private lateinit var instance: SongApplication
         fun getInstance(): SongApplication = instance
+        var stopDownloadHandler: (() -> Unit)? = null
+        var pauseDownloadHandler: (() -> Unit)? = null
+        var resumeDownloadHandler: (() -> Unit)? = null
     }
 
     @UnstableApi

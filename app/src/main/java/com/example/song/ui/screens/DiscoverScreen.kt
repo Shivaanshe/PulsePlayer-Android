@@ -387,6 +387,42 @@ fun DiscoverScreen(
                                                     }
                                                 }
                                             }
+                                            is DownloadState.Paused -> {
+                                                LinearProgressIndicator(
+                                                    progress = { 0.5f },
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(6.dp)
+                                                        .clip(RoundedCornerShape(3.dp)),
+                                                    color = Color(0xFFFFC107),
+                                                    trackColor = Color.White.copy(alpha = 0.1f)
+                                                )
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(top = 8.dp),
+                                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text(
+                                                        text = "Download Paused",
+                                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                        color = Color(0xFFFFC107),
+                                                        modifier = Modifier.weight(1f)
+                                                    )
+                                                    IconButton(
+                                                        onClick = { viewModel.resumeDownload() },
+                                                        modifier = Modifier.size(24.dp)
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.PlayArrow,
+                                                            contentDescription = "Resume Download",
+                                                            tint = Color.White.copy(alpha = 0.7f),
+                                                            modifier = Modifier.size(16.dp)
+                                                        )
+                                                    }
+                                                }
+                                            }
                                             is DownloadState.Idle -> {}
                                         }
                                     }

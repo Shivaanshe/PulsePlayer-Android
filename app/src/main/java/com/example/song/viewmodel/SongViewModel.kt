@@ -17,6 +17,11 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.content.Intent
+import androidx.core.app.NotificationCompat
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
@@ -28,6 +33,7 @@ import com.example.song.data.model.QueueItem
 import com.example.song.data.model.Song
 import com.example.song.data.model.StreamingItem
 import com.example.song.data.repository.SongRepository
+import com.example.song.receiver.DownloadActionReceiver
 import com.example.song.service.MusicService
 import com.example.song.util.CrashTracker
 import com.example.song.util.MusicQueueCache
@@ -41,6 +47,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,10 +64,14 @@ import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.Collections
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.ConcurrentLinkedDeque
 
 enum class ItemActionState {
     Idle, Loading, Success
+}
+
+enum class QueueState {
+    IDLE, DOWNLOADING, PAUSED
 }
 
 @OptIn(UnstableApi::class)
@@ -75,10 +88,121 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private var lastSentTimelineIds = listOf<Int>()
     private var isPreparingNewSession = false
 
+    private val _queueState = MutableStateFlow(QueueState.IDLE)
+    val queueState: StateFlow<QueueState> = _queueState.asStateFlow()
+
+    private val _uiEvent = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    val uiEvent: SharedFlow<String> = _uiEvent.asSharedFlow()
+
+    init {
+        SongApplication.stopDownloadHandler = { cancelDownload() }
+        SongApplication.pauseDownloadHandler = { pauseDownload() }
+        SongApplication.resumeDownloadHandler = { resumeDownload() }
+    }
+
+    private fun updateDownloadNotification(title: String, progressText: String, isPaused: Boolean = false) {
+        try {
+            val context = getApplication<Application>()
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val channelId = "pulse_download_channel"
+
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    channelId,
+                    "PulsePlayer Downloads",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Active download status and controls"
+                    setShowBadge(false)
+                }
+                notificationManager.createNotificationChannel(channel)
+            }
+
+            val stopIntent = Intent(context, DownloadActionReceiver::class.java).apply {
+                action = ACTION_STOP_DOWNLOAD
+            }
+            val stopPendingIntent = PendingIntent.getBroadcast(
+                context,
+                0,
+                stopIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val openIntent = Intent(context, com.example.song.MainActivity::class.java)
+            val openPendingIntent = PendingIntent.getActivity(
+                context,
+                0,
+                openIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+
+            val statusText = if (isPaused) "Paused: $progressText" else progressText
+
+            val builder = NotificationCompat.Builder(context, channelId)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle(title)
+                .setContentText(statusText)
+                .setOngoing(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(openPendingIntent)
+
+            if (isPaused) {
+                val resumeIntent = Intent(context, DownloadActionReceiver::class.java).apply {
+                    action = ACTION_RESUME_DOWNLOAD
+                }
+                val resumePendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    1,
+                    resumeIntent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                builder.addAction(
+                    android.R.drawable.ic_media_play,
+                    "Resume",
+                    resumePendingIntent
+                )
+            } else {
+                val pauseIntent = Intent(context, DownloadActionReceiver::class.java).apply {
+                    action = ACTION_PAUSE_DOWNLOAD
+                }
+                val pausePendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    2,
+                    pauseIntent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
+                builder.addAction(
+                    android.R.drawable.ic_media_pause,
+                    "Pause",
+                    pausePendingIntent
+                )
+            }
+
+            builder.addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Cancel",
+                stopPendingIntent
+            )
+
+            notificationManager.notify(DOWNLOAD_NOTIFICATION_ID, builder.build())
+        } catch (e: Exception) {
+            Log.e("SongViewModel", "Failed to update download notification", e)
+        }
+    }
+
+    private fun cancelDownloadNotification() {
+        try {
+            val context = getApplication<Application>()
+            val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            notificationManager.cancel(DOWNLOAD_NOTIFICATION_ID)
+        } catch (_: Exception) {}
+    }
+
+    @Suppress("DEPRECATION")
     private fun isConnectedToInternet(): Boolean {
         val context = getApplication<Application>()
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = connectivityManager.activeNetwork ?: return false
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+        val network = connectivityManager.activeNetwork ?: return connectivityManager.activeNetworkInfo?.isConnected == true
         val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
         return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
@@ -829,10 +953,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                                            error.message?.contains("No address associated", ignoreCase = true) == true ||
                                            error.message?.contains("Network is unreachable", ignoreCase = true) == true
 
-                            _playbackError.value = if (isOffline) {
-                                "App is offline. Please check your Internet connection."
+                            if (isOffline) {
+                                _playbackError.value = "App is offline. Please check your Internet connection."
                             } else {
-                                "Playback Error: ${error.localizedMessage}"
+                                _playbackError.value = "Playback Error: ${error.localizedMessage}"
+                                viewModelScope.launch {
+                                    _uiEvent.emit("Skipped: Track unavailable or age-restricted.")
+                                }
                             }
                             _isPlaying.value = false
                         }
@@ -1620,6 +1747,20 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
                 val isCollection = items.any { it.isPlaylist } || url.contains("/playlist/") || url.contains("/album/") || url.contains("list=")
                 
+                if (isCollection) {
+                    val playlistHeader = items.find { it.isPlaylist } ?: items.firstOrNull()
+                    val collectionTitle = playlistHeader?.title ?: ""
+
+                    val existingPlaylist = _playlists.value.find { 
+                        it.name.equals(collectionTitle, ignoreCase = true) 
+                    }
+                    if (existingPlaylist != null && collectionTitle.isNotBlank()) {
+                        _downloadState.value = DownloadState.Idle
+                        _uiEvent.emit("This playlist is already in your library!")
+                        return@launch
+                    }
+                }
+
                 if (items.size == 1 && !isCollection) {
                     val item = items[0]
                     downloadFromYoutube(
@@ -1649,9 +1790,51 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Queue management for sequential downloads
-    private val downloadQueue = ConcurrentLinkedQueue<DownloadRequest>()
+    private val downloadQueue = ConcurrentLinkedDeque<DownloadRequest>()
     private val activeDownloadUrls = Collections.synchronizedSet(mutableSetOf<String>())
     private var queueWorkerJob: Job? = null
+
+    fun pauseDownload() {
+        if (_queueState.value == QueueState.DOWNLOADING) {
+            _queueState.value = QueueState.PAUSED
+            _downloadState.value = DownloadState.Paused
+            repository.cancelDownload() // Stops the current track, but leaves queue Worker alive in the delay loop
+            updateDownloadNotification("PulsePlayer Downloads", "Download paused", isPaused = true)
+            viewModelScope.launch {
+                _uiEvent.emit("Download paused.")
+            }
+        }
+    }
+
+    fun resumeDownload() {
+        if (_queueState.value == QueueState.PAUSED) {
+            _queueState.value = QueueState.DOWNLOADING
+            startQueueWorkerIfNeeded()
+            viewModelScope.launch {
+                _uiEvent.emit("Download resumed.")
+            }
+        }
+    }
+
+    fun cancelDownload() {
+        downloadQueue.clear()
+        synchronized(activeDownloadUrls) {
+            activeDownloadUrls.clear() // Force clear to prevent zombie locks
+        }
+        repository.cancelDownload()
+        queueWorkerJob?.cancel()
+        queueWorkerJob = null
+        _queueState.value = QueueState.IDLE
+        _downloadState.value = DownloadState.Idle
+        cancelDownloadNotification()
+        viewModelScope.launch {
+            _uiEvent.emit("Download cancelled.")
+        }
+    }
+
+    fun stopDownload() {
+        cancelDownload()
+    }
 
     private fun enqueueDownloadRequest(request: DownloadRequest): CompletableDeferred<Unit> {
         val urlKey = request.url.trim()
@@ -1677,13 +1860,31 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     private fun startQueueWorkerIfNeeded() {
         if (queueWorkerJob?.isActive == true) return
 
+        _queueState.value = QueueState.DOWNLOADING
+
         queueWorkerJob = viewModelScope.launch(Dispatchers.IO) {
             var completedCount = 0
 
-            while (isActive) {
-                val request = downloadQueue.poll() ?: break
+            while (isActive && _queueState.value != QueueState.IDLE) {
+                while (_queueState.value == QueueState.PAUSED && isActive) {
+                    delay(500)
+                }
+                if (!isActive) break
+
+                val request = downloadQueue.poll()
+                if (request == null) break
+
+                // Network check loop
+                while (!isConnectedToInternet() && isActive && _queueState.value != QueueState.IDLE) {
+                    _downloadState.value = DownloadState.Error("Waiting for network connection...")
+                    updateDownloadNotification("PulsePlayer Downloads", "Waiting for network...", isPaused = true)
+                    delay(2000)
+                }
+                if (!isActive) break
+
                 val currentTotal = completedCount + downloadQueue.size + 1
                 val currentIndex = completedCount + 1
+                val songTitle = request.overrideTitle ?: request.url
 
                 val isReadyFlow = SongApplication.getInstance().isReady
                 if (!isReadyFlow.value) {
@@ -1698,14 +1899,17 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         delay(2000)
                         if (downloadQueue.isEmpty()) {
                             _downloadState.value = DownloadState.Idle
+                            _queueState.value = QueueState.IDLE
+                            cancelDownloadNotification()
                         }
                         continue
                     }
                 }
 
                 try {
-                    PulseLogger.log("Processing queued download ($currentIndex/$currentTotal): ${request.overrideTitle ?: request.url}")
+                    PulseLogger.log("Processing queued download ($currentIndex/$currentTotal): $songTitle")
                     _downloadState.value = DownloadState.Downloading(0f, currentIndex, currentTotal)
+                    updateDownloadNotification("Downloading ($currentIndex/$currentTotal)", songTitle)
 
                     repository.downloadYouTubeAudio(
                         url = request.url,
@@ -1715,10 +1919,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         overrideImageUrl = request.overrideImageUrl
                     ) { progress, _ ->
                         _downloadState.value = DownloadState.Downloading(progress, currentIndex, currentTotal)
+                        updateDownloadNotification("Downloading ($currentIndex/$currentTotal)", "$songTitle (${progress.toInt()}%)")
                     }
 
                     _downloadState.value = DownloadState.Downloading(100f, currentIndex, currentTotal)
-                    PulseLogger.log("Finished queued download: ${request.overrideTitle ?: request.url}")
+                    PulseLogger.log("Finished queued download: $songTitle")
 
                     val states = _itemActionStates.value.toMutableMap()
                     states[request.url] = ItemActionState.Success
@@ -1744,7 +1949,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
 
-            if (completedCount > 0) {
+            val wasStopped = _queueState.value == QueueState.IDLE || !isActive
+            _queueState.value = QueueState.IDLE
+            cancelDownloadNotification()
+
+            if (!wasStopped && completedCount > 0) {
                 _downloadState.value = DownloadState.Success
                 delay(1500)
                 if (downloadQueue.isEmpty()) {
@@ -1759,47 +1968,72 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         states.remove(request.url)
         _itemActionStates.value = states
 
-        if (e is CancellationException || e.message == "Download cancelled") {
-            _downloadState.value = DownloadState.Idle
-        } else {
-            PulseLogger.log("Queued download failed: ${e.localizedMessage}", isError = true)
-            CrashTracker.recordException(
-                throwable = e,
-                breadcrumb = "Queued download failed",
-                customKeys = mapOf(
-                    "download_url" to request.url,
-                    "override_title" to (request.overrideTitle ?: "none")
-                )
-            )
+        val errorMsg = e.localizedMessage ?: e.message ?: e.javaClass.simpleName
+        val isCancelled = e is CancellationException ||
+                          errorMsg.contains("cancel", ignoreCase = true) ||
+                          e is java.io.InterruptedIOException ||
+                          e.javaClass.simpleName.contains("CanceledException", ignoreCase = true)
 
-            val songTitle = request.overrideTitle ?: "Song"
-            withContext(Dispatchers.Main) {
-                Toast.makeText(
-                    getApplication(),
-                    "Failed to download $songTitle: Not available or blocked.",
-                    Toast.LENGTH_SHORT
-                ).show()
+        if (isCancelled) {
+            if (_queueState.value == QueueState.PAUSED) {
+                downloadQueue.addFirst(request) // Push back to front so it resumes later!
+            } else {
+                _downloadState.value = DownloadState.Idle
             }
+            request.deferred.completeExceptionally(e)
+            return
+        }
 
+        PulseLogger.log("Queued download failed: ${e.localizedMessage}", isError = true)
+        CrashTracker.recordException(
+            throwable = e,
+            breadcrumb = "Queued download failed",
+            customKeys = mapOf(
+                "download_url" to request.url,
+                "override_title" to (request.overrideTitle ?: "none")
+            )
+        )
+
+        val songTitle = request.overrideTitle ?: "Song"
+        val isAgeRestricted = errorMsg.contains("confirm your age", ignoreCase = true) ||
+                              errorMsg.contains("Sign in to confirm", ignoreCase = true) ||
+                              errorMsg.contains("age-restricted", ignoreCase = true) ||
+                              errorMsg.contains("age restricted", ignoreCase = true) ||
+                              errorMsg.contains("Sign in", ignoreCase = true) ||
+                              errorMsg.contains("requires authentication", ignoreCase = true)
+
+        if (isAgeRestricted) {
+            _uiEvent.emit("Skipped $songTitle: Age-restricted content cannot be downloaded anonymously.")
+        } else {
             val isOffline = !isConnectedToInternet() ||
                            e is UnknownHostException ||
-                           (e.localizedMessage?.contains("Unable to resolve host", ignoreCase = true) == true) ||
-                           (e.localizedMessage?.contains("No address associated", ignoreCase = true) == true) ||
-                           (e.localizedMessage?.contains("Network is unreachable", ignoreCase = true) == true)
+                           (errorMsg.contains("Unable to resolve host", ignoreCase = true)) ||
+                           (errorMsg.contains("No address associated", ignoreCase = true)) ||
+                           (errorMsg.contains("Network is unreachable", ignoreCase = true))
 
-            val msg = if (isOffline) "App is offline. Please check your Internet connection." else "Download failed: ${e.localizedMessage ?: "Unknown error"}"
-            _downloadState.value = DownloadState.Error(msg)
+            val msg = if (isOffline) "App is offline. Please check your Internet connection." else "Failed to download $songTitle: Not available or blocked."
+            _uiEvent.emit(msg)
+        }
+
+            val isOffline = !isConnectedToInternet() || e is UnknownHostException
+            val stateMsg = if (isOffline) "App is offline. Please check your Internet connection." else "Download failed: ${e.localizedMessage ?: "Unknown error"}"
+            _downloadState.value = DownloadState.Error(stateMsg)
             viewModelScope.launch {
                 delay(2500)
                 if (downloadQueue.isEmpty() && _downloadState.value is DownloadState.Error) {
                     _downloadState.value = DownloadState.Idle
                 }
             }
+            request.deferred.completeExceptionally(e)
         }
-        request.deferred.completeExceptionally(e)
-    }
 
     fun startBatchDownload(asPlaylist: Boolean) {
+        if (_queueState.value == QueueState.DOWNLOADING || _queueState.value == QueueState.PAUSED) {
+            viewModelScope.launch {
+                _uiEvent.emit("A download is already in progress. Please finish or stop it first.")
+            }
+            return
+        }
         viewModelScope.launch {
             val items = _pendingDownloadItems.value.filter { !it.isPlaylist }
             if (items.isEmpty()) return@launch
@@ -1838,6 +2072,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         overrideArtist: String? = null,
         overrideImageUrl: String? = null
     ) {
+        if ((_queueState.value == QueueState.DOWNLOADING || _queueState.value == QueueState.PAUSED) && downloadQueue.isNotEmpty()) {
+            viewModelScope.launch {
+                _uiEvent.emit("A download is already in progress. Please finish or stop it first.")
+            }
+            return
+        }
         val trimmedUrl = url.trim()
         viewModelScope.launch {
             val request = DownloadRequest(
@@ -1852,15 +2092,6 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             } catch (_: Exception) {
             }
         }
-    }
-
-    fun cancelDownload() {
-        downloadQueue.clear()
-        synchronized(activeDownloadUrls) {
-            activeDownloadUrls.clear()
-        }
-        repository.cancelDownload()
-        _downloadState.value = DownloadState.Idle
     }
 
     fun clearOnlineSearchResults() {
@@ -1965,6 +2196,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
         super.onCleared()
     }
+
+    companion object {
+        private const val DOWNLOAD_NOTIFICATION_ID = 8888
+        private const val ACTION_STOP_DOWNLOAD = "com.example.song.ACTION_STOP_DOWNLOAD"
+        private const val ACTION_PAUSE_DOWNLOAD = "com.example.song.ACTION_PAUSE_DOWNLOAD"
+        private const val ACTION_RESUME_DOWNLOAD = "com.example.song.ACTION_RESUME_DOWNLOAD"
+    }
 }
 
 data class DownloadRequest(
@@ -1985,6 +2223,7 @@ sealed class DownloadState {
         val current: Int = 1,
         val total: Int = 1
     ) : DownloadState()
+    data object Paused : DownloadState()
     data object Success : DownloadState()
     data class Error(val message: String) : DownloadState()
 }
