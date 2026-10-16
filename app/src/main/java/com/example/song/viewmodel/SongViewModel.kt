@@ -758,7 +758,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         emptyList()
                     }
 
-                    val existingStreamingItems = repository.getItemsForPlaylistSync(state.existingPlaylist.youtubeUrl)
+                    // ONLY use the streaming cache if it's a streaming-only playlist. 
+                    // For downloaded playlists, the streaming cache contains stale ghost records.
+                    val existingStreamingItems = if (targetRoomPlaylistId == null) {
+                        repository.getItemsForPlaylistSync(state.existingPlaylist.youtubeUrl)
+                    } else emptyList()
 
                     val existingCoreTitles = (existingRoomSongs.map { it.title.toCoreTitle() } + 
                                               existingStreamingItems.map { it.title.toCoreTitle() }).toSet()
@@ -779,18 +783,48 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     if (missingItems.isNotEmpty()) {
+                        var downloadCount = 0
+                        var relinkCount = 0
+                        val allLibrarySongs = repository.getAllSongsSync()
+
                         missingItems.forEach { item ->
-                            val request = DownloadRequest(
-                                url = item.youtubeUrl,
-                                isLibrary = true,
-                                overrideTitle = item.title,
-                                overrideArtist = item.artist,
-                                overrideImageUrl = item.thumbnailUrl,
-                                playlistId = targetRoomPlaylistId
-                            )
-                            enqueueDownloadRequest(request)
+                            val itemVideoId = item.youtubeUrl.extractYoutubeVideoId()
+                            val itemCoreTitle = item.title.toCoreTitle()
+
+                            // Check if the missing song is ALREADY downloaded in the user's Library
+                            val libraryMatch = allLibrarySongs.find { libSong ->
+                                val libVideoId = libSong.audioUri.extractYoutubeVideoId()
+                                val libCoreTitle = libSong.title.toCoreTitle()
+                                (itemVideoId.length >= 8 && libVideoId == itemVideoId) || 
+                                (itemCoreTitle.isNotBlank() && (libCoreTitle.contains(itemCoreTitle) || itemCoreTitle.contains(libCoreTitle)))
+                            }
+
+                            if (libraryMatch != null && targetRoomPlaylistId != null) {
+                                // Song is in Library but missing from playlist. Re-link it instantly.
+                                repository.addSongToPlaylist(libraryMatch.id, targetRoomPlaylistId)
+                                relinkCount++
+                            } else {
+                                // Song is completely missing from device. Queue it for download.
+                                val request = DownloadRequest(
+                                    url = item.youtubeUrl,
+                                    isLibrary = true,
+                                    overrideTitle = item.title,
+                                    overrideArtist = item.artist,
+                                    overrideImageUrl = item.thumbnailUrl,
+                                    playlistId = targetRoomPlaylistId
+                                )
+                                enqueueDownloadRequest(request)
+                                downloadCount++
+                            }
                         }
-                        _uiEvent.emit("Updating playlist: Downloading ${missingItems.size} new track(s)...")
+
+                        if (downloadCount > 0) {
+                            _uiEvent.emit("Updating playlist: Downloading $downloadCount new track(s)...")
+                        } else if (relinkCount > 0) {
+                            _uiEvent.emit("Playlist updated: Restored $relinkCount track(s) from Library.")
+                        } else {
+                            _uiEvent.emit("Playlist is already up to date.")
+                        }
                     } else {
                         _uiEvent.emit("Playlist is already up to date.")
                     }
