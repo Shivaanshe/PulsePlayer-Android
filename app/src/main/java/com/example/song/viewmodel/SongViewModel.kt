@@ -2127,7 +2127,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                                        !isConnectedToInternet()
 
                     if (isNetworkErr) {
-                        PulseLogger.log("Network error on $songTitle: ${e.localizedMessage}. Re-queuing track and pausing until reconnected...", isError = true)
+                        PulseLogger.log("Network error on $songTitle: ${e.localizedMessage}. Re-queuing track and pausing until reconnected...", isError = false)
                         downloadQueue.addFirst(request)
                         _queueState.value = QueueState.PAUSED
                         _downloadState.value = DownloadState.Error("Waiting for network connection...")

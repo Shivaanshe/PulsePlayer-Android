@@ -552,6 +552,19 @@ class SongRepository(
                     progressCallback(progress, eta, line)
                 }
                 Log.d("SongRepository", "Download finished. Exit code: ${response.exitCode}")
+            } catch (e: com.yausername.youtubedl_android.YoutubeDLException) {
+                val errorMsg = e.message ?: ""
+                val isNetworkErr = errorMsg.contains("Errno 7", ignoreCase = true) || 
+                                   errorMsg.contains("Unable to resolve host", ignoreCase = true) ||
+                                   errorMsg.contains("No address associated", ignoreCase = true) ||
+                                   errorMsg.contains("Network is unreachable", ignoreCase = true)
+                
+                if (isNetworkErr) {
+                    Log.w("SongRepository", "Network disconnect during download: $errorMsg")
+                } else {
+                    Log.e("SongRepository", "Execution failed", e)
+                }
+                throw e
             } catch (e: Exception) {
                 if (e is CancellationException || 
                     e.javaClass.simpleName.contains("CanceledException", ignoreCase = true) || 
@@ -639,9 +652,22 @@ class SongRepository(
                 throw Exception("Downloaded file not found in Music folder")
             }
         } catch (e: Exception) {
-            if (e is CancellationException) throw e
+            val errorMsg = e.message ?: ""
+            val isNetworkErr = e is java.net.UnknownHostException || 
+                               e is java.net.SocketTimeoutException || 
+                               e is java.net.ConnectException || 
+                               e is CancellationException ||
+                               errorMsg.contains("Errno 7", ignoreCase = true) ||
+                               errorMsg.contains("Unable to resolve host", ignoreCase = true) ||
+                               errorMsg.contains("No address associated", ignoreCase = true) ||
+                               errorMsg.contains("Network is unreachable", ignoreCase = true)
 
-            Log.e("SongRepository", "General error during download", e)
+            if (isNetworkErr) {
+                Log.w("SongRepository", "Network or cancellation during download: $errorMsg")
+            } else {
+                Log.e("SongRepository", "General error during download", e)
+            }
+
             val tempFiles = musicDir.listFiles { _, name -> name.contains(requestId) }
             tempFiles?.forEach { file ->
                 try {
