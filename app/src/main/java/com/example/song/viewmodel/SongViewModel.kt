@@ -98,6 +98,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         SongApplication.stopDownloadHandler = { cancelDownload() }
         SongApplication.pauseDownloadHandler = { pauseDownload() }
         SongApplication.resumeDownloadHandler = { resumeDownload() }
+
+        viewModelScope.launch {
+            repository.cleanUpOrphanedTempFiles()
+        }
     }
 
     private fun updateDownloadNotification(title: String, progressText: String, isPaused: Boolean = false) {
@@ -2183,6 +2187,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     override fun onCleared() {
+        SongApplication.stopDownloadHandler = null
+        SongApplication.pauseDownloadHandler = null
+        SongApplication.resumeDownloadHandler = null
+
         isConnecting = false
         val controller = mediaController
         mediaController = null

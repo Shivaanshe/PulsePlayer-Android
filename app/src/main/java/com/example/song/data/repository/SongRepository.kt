@@ -417,6 +417,20 @@ class SongRepository(
         spotifyService.getMetadata(url)
     }
 
+    suspend fun cleanUpOrphanedTempFiles() = withContext(Dispatchers.IO) {
+        val musicDir = File(baseDir, "DownloadedMusic")
+        if (musicDir.exists()) {
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}.*")
+            musicDir.listFiles()?.forEach { file ->
+                if (file.name.matches(uuidRegex) || file.name.endsWith(".part") || file.name.endsWith(".ytdl")) {
+                    try {
+                        if (file.exists()) file.delete()
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
     fun cancelDownload() {
         currentRequestId?.let { reqId ->
             try {
