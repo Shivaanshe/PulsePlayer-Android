@@ -691,30 +691,46 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val state = _duplicatePlaylistState.value
             if (state is DuplicatePlaylistState.UpdateAvailable) {
-                repository.smartMergePlaylist(
-                    existingPlaylist = state.existingPlaylist,
-                    newPlaylistHeader = state.newHeader,
-                    newTracks = state.newTracks
-                )
+                if (state.existingPlaylist.id > 0 && state.existingPlaylist.isPlaylist) {
+                    repository.smartMergePlaylist(
+                        existingPlaylist = state.existingPlaylist,
+                        newPlaylistHeader = state.newHeader,
+                        newTracks = state.newTracks
+                    )
+                }
 
                 if (_pendingDownloadItems.value.isNotEmpty()) {
                     val pending = _pendingDownloadItems.value
                     _pendingDownloadItems.value = emptyList()
 
-                    val existingTracks = repository.getItemsForPlaylistSync(state.existingPlaylist.youtubeUrl)
-                    val existingUrls = existingTracks.map { it.youtubeUrl }.toSet()
-                    val missingDownloadItems = pending.filter { !existingUrls.contains(it.youtubeUrl) }
+                    val targetRoomPlaylistId = state.existingPlaylist.id.takeIf { it > 0 }
 
-                    missingDownloadItems.forEach { item ->
-                        val request = DownloadRequest(
-                            url = item.youtubeUrl,
-                            isLibrary = true,
-                            overrideTitle = item.title,
-                            overrideArtist = item.artist,
-                            overrideImageUrl = item.thumbnailUrl,
-                            playlistId = if (state.existingPlaylist.id > 0) state.existingPlaylist.id else null
-                        )
-                        enqueueDownloadRequest(request)
+                    val existingAudioUris = if (targetRoomPlaylistId != null) {
+                        repository.getSongsInPlaylistSync(targetRoomPlaylistId).map { it.audioUri }.toSet()
+                    } else {
+                        repository.getItemsForPlaylistSync(state.existingPlaylist.youtubeUrl).map { it.youtubeUrl }.toSet()
+                    }
+
+                    val missingItems = pending.filter { item ->
+                        !existingAudioUris.contains(item.youtubeUrl) &&
+                        !existingAudioUris.any { uri -> uri.contains(item.title, ignoreCase = true) }
+                    }
+
+                    if (missingItems.isNotEmpty()) {
+                        missingItems.forEach { item ->
+                            val request = DownloadRequest(
+                                url = item.youtubeUrl,
+                                isLibrary = true,
+                                overrideTitle = item.title,
+                                overrideArtist = item.artist,
+                                overrideImageUrl = item.thumbnailUrl,
+                                playlistId = targetRoomPlaylistId
+                            )
+                            enqueueDownloadRequest(request)
+                        }
+                        _uiEvent.emit("Updating playlist: Downloading ${missingItems.size} new track(s)...")
+                    } else {
+                        _uiEvent.emit("Playlist is already up to date.")
                     }
                 }
 
@@ -1782,13 +1798,20 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     val newTracks = sanitizedItems.filter { !it.isPlaylist }
 
-                    val existingRoomPlaylist = _playlists.value.find { 
-                        it.name.equals(collectionTitle, ignoreCase = true) 
+                    val existingRoomPlaylist = _playlists.value.find { p ->
+                        if (p.name.equals(collectionTitle, ignoreCase = true)) return@find true
+                        val pSongs = repository.getSongsInPlaylistSync(p.id)
+                        pSongs.any { pSong ->
+                            newTracks.any { nTrack ->
+                                pSong.audioUri == nTrack.youtubeUrl ||
+                                (pSong.title.isNotBlank() && pSong.title.equals(nTrack.title, ignoreCase = true))
+                            }
+                        }
                     }
                     val existingStreamingPlaylist = repository.getPlaylistByUrl(cleanUrl)
 
                     val existingCount = if (existingRoomPlaylist != null) {
-                        repository.getSongIdsForPlaylist(existingRoomPlaylist.id).size
+                        repository.getSongsInPlaylistSync(existingRoomPlaylist.id).size
                     } else if (existingStreamingPlaylist != null) {
                         repository.getItemsForPlaylistSync(cleanUrl).size
                     } else {
@@ -1796,16 +1819,18 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     }
 
                     if (existingRoomPlaylist != null || existingStreamingPlaylist != null) {
-                        _pendingDownloadItems.value = newTracks
+                        val playlistName = existingRoomPlaylist?.name ?: existingStreamingPlaylist?.title ?: collectionTitle
 
                         if (existingCount == newTracks.size) {
+                            _pendingDownloadItems.value = emptyList()
                             _downloadState.value = DownloadState.Idle
-                            _duplicatePlaylistState.value = DuplicatePlaylistState.AlreadyExists(collectionTitle)
+                            _duplicatePlaylistState.value = DuplicatePlaylistState.AlreadyExists(playlistName)
                             return@launch
                         } else {
+                            _pendingDownloadItems.value = newTracks
                             _downloadState.value = DownloadState.Idle
                             _duplicatePlaylistState.value = DuplicatePlaylistState.UpdateAvailable(
-                                existingPlaylist = existingStreamingPlaylist ?: StreamingItem(id = existingRoomPlaylist?.id ?: 0, title = collectionTitle, youtubeUrl = cleanUrl, thumbnailUrl = playlistHeader?.thumbnailUrl, isPlaylist = true),
+                                existingPlaylist = existingStreamingPlaylist ?: StreamingItem(id = existingRoomPlaylist?.id ?: 0, title = playlistName, youtubeUrl = cleanUrl, thumbnailUrl = playlistHeader?.thumbnailUrl, isPlaylist = true),
                                 newHeader = sanitizedHeader,
                                 newTracks = newTracks,
                                 existingCount = existingCount,

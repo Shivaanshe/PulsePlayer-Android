@@ -407,6 +407,10 @@ class SongRepository(
         return playlistDao.getSongsInPlaylist(playlistId)
     }
 
+    suspend fun getSongsInPlaylistSync(playlistId: Int): List<Song> = withContext(Dispatchers.IO) {
+        playlistDao.getSongsInPlaylistSync(playlistId)
+    }
+
     suspend fun getFirstSongSync(): Song? = withContext(Dispatchers.IO) {
         songDao.getFirstSongSync()
     }

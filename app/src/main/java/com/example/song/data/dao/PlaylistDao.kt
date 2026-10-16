@@ -50,6 +50,15 @@ interface PlaylistDao {
     """)
     fun getSongsInPlaylist(playlistId: Int): Flow<List<Song>>
 
+    @Transaction
+    @Query("""
+        SELECT songs.* FROM songs 
+        INNER JOIN playlist_song_cross_ref ON songs.id = playlist_song_cross_ref.songId 
+        WHERE playlist_song_cross_ref.playlistId = :playlistId
+        ORDER BY playlist_song_cross_ref.position ASC
+    """)
+    suspend fun getSongsInPlaylistSync(playlistId: Int): List<Song>
+
     @Query("SELECT songId FROM playlist_song_cross_ref")
     fun getAllSongIdsInPlaylists(): Flow<List<Int>>
 
