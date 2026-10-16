@@ -363,8 +363,12 @@ class MusicService : MediaSessionService() {
             .build()
 
         try {
-            val notificationManager = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
-            notificationManager.cancel(FOREGROUND_NOTIFICATION_ID)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
         } catch (_: Exception) {}
     }
 
@@ -1007,7 +1011,6 @@ class MusicService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startImmediateForegroundNotification()
         return super.onStartCommand(intent, flags, startId)
     }
 
