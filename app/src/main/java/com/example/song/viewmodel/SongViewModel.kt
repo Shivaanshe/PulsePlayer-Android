@@ -1796,7 +1796,9 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         if (_queueState.value == QueueState.DOWNLOADING) {
             _queueState.value = QueueState.PAUSED
             _downloadState.value = DownloadState.Paused
-            repository.cancelDownload() // Stops the current track, but leaves queue Worker alive in the delay loop
+            repository.cancelDownload() // Stops the current yt-dlp process
+            queueWorkerJob?.cancel() // Kill the background worker thread so it cleanly resets
+            queueWorkerJob = null
             updateDownloadNotification("PulsePlayer Downloads", "Download paused", isPaused = true)
             viewModelScope.launch {
                 _uiEvent.emit("Download paused.")
@@ -1807,7 +1809,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     fun resumeDownload() {
         if (_queueState.value == QueueState.PAUSED) {
             _queueState.value = QueueState.DOWNLOADING
-            startQueueWorkerIfNeeded()
+            startQueueWorkerIfNeeded() // Spins up a fresh worker on downloadScope
             viewModelScope.launch {
                 _uiEvent.emit("Download resumed.")
             }
@@ -1856,26 +1858,20 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         queueWorkerJob = downloadScope.launch {
             var completedCount = 0
 
-            while (isActive && _queueState.value != QueueState.IDLE) {
-                while (_queueState.value == QueueState.PAUSED && isActive) {
-                    delay(500)
-                }
-                if (!isActive) break
-
-                val request = downloadQueue.poll()
-                if (request == null) break
+            while (isActive && downloadQueue.isNotEmpty() && _queueState.value == QueueState.DOWNLOADING) {
+                val request = downloadQueue.poll() ?: break
 
                 synchronized(activeDownloadUrls) {
                     activeDownloadUrls.add(request.url.trim())
                 }
 
                 // Network check loop
-                while (!isConnectedToInternet() && isActive && _queueState.value != QueueState.IDLE) {
+                while (!isConnectedToInternet() && isActive && _queueState.value == QueueState.DOWNLOADING) {
                     _downloadState.value = DownloadState.Error("Waiting for network connection...")
                     updateDownloadNotification("PulsePlayer Downloads", "Waiting for network...", isPaused = true)
                     delay(2000)
                 }
-                if (!isActive) break
+                if (!isActive || _queueState.value != QueueState.DOWNLOADING) break
 
                 val currentTotal = completedCount + downloadQueue.size + 1
                 val currentIndex = completedCount + 1
@@ -1947,6 +1943,11 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 } catch (e: Exception) {
+                    if (e is CancellationException) {
+                        // If paused, re-add to front of queue so it resumes cleanly
+                        downloadQueue.addFirst(request)
+                        break
+                    }
                     onRequestFailed(request, e)
                 } finally {
                     synchronized(activeDownloadUrls) {
@@ -1956,10 +1957,12 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             val wasStopped = _queueState.value == QueueState.IDLE || !isActive
-            _queueState.value = QueueState.IDLE
-            cancelDownloadNotification()
+            if (_queueState.value != QueueState.PAUSED) {
+                _queueState.value = QueueState.IDLE
+                cancelDownloadNotification()
+            }
 
-            if (!wasStopped && completedCount > 0) {
+            if (!wasStopped && completedCount > 0 && downloadQueue.isEmpty()) {
                 _downloadState.value = DownloadState.Success
                 delay(1500)
                 if (downloadQueue.isEmpty()) {
