@@ -104,6 +104,33 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.cleanUpOrphanedTempFiles()
         }
+
+        registerNetworkCallback()
+    }
+
+    private fun registerNetworkCallback() {
+        try {
+            val context = getApplication<Application>()
+            val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return
+            val request = android.net.NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+
+            connectivityManager.registerNetworkCallback(request, object : ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    if (_queueState.value == QueueState.PAUSED && downloadQueue.isNotEmpty()) {
+                        viewModelScope.launch {
+                            delay(1000)
+                            if (isConnectedToInternet() && _queueState.value == QueueState.PAUSED) {
+                                resumeDownload()
+                            }
+                        }
+                    }
+                }
+            })
+        } catch (e: Exception) {
+            Log.w("SongViewModel", "Failed to register network callback", e)
+        }
     }
 
     private fun updateDownloadNotification(title: String, progressText: String, isPaused: Boolean = false) {
@@ -687,6 +714,26 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private fun String.toCoreTitle(): String {
+        return this.lowercase()
+            .substringBefore("|")
+            .substringBefore("(")
+            .substringBefore("[")
+            .substringBefore("-")
+            .replace(Regex("[^a-z0-9]"), "")
+            .trim()
+    }
+
+    private fun String.extractYoutubeVideoId(): String {
+        return if (this.contains("v=")) {
+            this.substringAfter("v=").substringBefore("&")
+        } else if (this.contains("youtu.be/")) {
+            this.substringAfter("youtu.be/").substringBefore("?")
+        } else {
+            this
+        }
+    }
+
     fun confirmUpdatePlaylist() {
         viewModelScope.launch {
             val state = _duplicatePlaylistState.value
@@ -705,15 +752,30 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
 
                     val targetRoomPlaylistId = state.existingPlaylist.id.takeIf { it > 0 }
 
-                    val existingAudioUris = if (targetRoomPlaylistId != null) {
-                        repository.getSongsInPlaylistSync(targetRoomPlaylistId).map { it.audioUri }.toSet()
+                    val existingRoomSongs = if (targetRoomPlaylistId != null) {
+                        repository.getSongsInPlaylistSync(targetRoomPlaylistId)
                     } else {
-                        repository.getItemsForPlaylistSync(state.existingPlaylist.youtubeUrl).map { it.youtubeUrl }.toSet()
+                        emptyList()
                     }
 
+                    val existingStreamingItems = repository.getItemsForPlaylistSync(state.existingPlaylist.youtubeUrl)
+
+                    val existingCoreTitles = (existingRoomSongs.map { it.title.toCoreTitle() } + 
+                                              existingStreamingItems.map { it.title.toCoreTitle() }).toSet()
+
+                    val existingVideoIds = (existingRoomSongs.map { it.audioUri.extractYoutubeVideoId() } + 
+                                            existingStreamingItems.map { it.youtubeUrl.extractYoutubeVideoId() }).toSet()
+
                     val missingItems = pending.filter { item ->
-                        !existingAudioUris.contains(item.youtubeUrl) &&
-                        !existingAudioUris.any { uri -> uri.contains(item.title, ignoreCase = true) }
+                        val itemCoreTitle = item.title.toCoreTitle()
+                        val itemVideoId = item.youtubeUrl.extractYoutubeVideoId()
+
+                        val matchesTitle = itemCoreTitle.isNotBlank() && existingCoreTitles.any { existing ->
+                            existing.contains(itemCoreTitle) || itemCoreTitle.contains(existing)
+                        }
+                        val matchesVideoId = itemVideoId.length >= 8 && existingVideoIds.contains(itemVideoId)
+
+                        !matchesTitle && !matchesVideoId
                     }
 
                     if (missingItems.isNotEmpty()) {
@@ -2020,7 +2082,27 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 } catch (e: Exception) {
-                    if (e is CancellationException) {
+                    val errorMsg = e.localizedMessage ?: e.message ?: e.javaClass.simpleName
+                    val isNetworkErr = e is UnknownHostException || 
+                                       e is SocketTimeoutException ||
+                                       e is java.net.ConnectException ||
+                                       errorMsg.contains("Errno 7", ignoreCase = true) ||
+                                       errorMsg.contains("Unable to resolve host", ignoreCase = true) ||
+                                       errorMsg.contains("No address associated", ignoreCase = true) ||
+                                       errorMsg.contains("Network is unreachable", ignoreCase = true) ||
+                                       !isConnectedToInternet()
+
+                    if (isNetworkErr) {
+                        PulseLogger.log("Network error on $songTitle: ${e.localizedMessage}. Re-queuing track and pausing until reconnected...", isError = true)
+                        downloadQueue.addFirst(request)
+                        _queueState.value = QueueState.PAUSED
+                        _downloadState.value = DownloadState.Error("Waiting for network connection...")
+                        updateDownloadNotification("PulsePlayer Downloads", "Waiting for network...", isPaused = true)
+                        viewModelScope.launch {
+                            _uiEvent.emit("Network disconnected. Queue paused until reconnected.")
+                        }
+                        break
+                    } else if (e is CancellationException) {
                         // If paused, re-add to front of queue so it resumes cleanly
                         downloadQueue.addFirst(request)
                         break
