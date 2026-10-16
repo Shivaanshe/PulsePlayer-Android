@@ -265,7 +265,13 @@ class SongRepository(
 
     suspend fun deleteStreamingItem(item: StreamingItem) {
         if (item.isPlaylist) {
+            val playlistItems = streamingDao.getItemsForPlaylistSync(item.youtubeUrl)
+            for (pItem in playlistItems) {
+                deleteLocalFileForStreamingItem(pItem)
+            }
             streamingDao.deletePlaylistItems(item.youtubeUrl)
+        } else {
+            deleteLocalFileForStreamingItem(item)
         }
         streamingDao.deleteItem(item)
     }
@@ -273,10 +279,20 @@ class SongRepository(
     suspend fun deleteStreamingItemById(itemId: Int) {
         val item = streamingDao.getItemById(itemId)
         item?.let {
-            if (it.isPlaylist) {
-                streamingDao.deletePlaylistItems(it.youtubeUrl)
+            deleteStreamingItem(it)
+        }
+    }
+
+    private suspend fun deleteLocalFileForStreamingItem(item: StreamingItem) {
+        try {
+            val song = songDao.getAllSongsSync().find { 
+                it.audioUri == item.youtubeUrl || it.title.equals(item.title, ignoreCase = true) 
             }
-            streamingDao.deleteItemById(itemId)
+            if (song != null) {
+                deleteSong(song.id)
+            }
+        } catch (e: Exception) {
+            Log.e("SongRepository", "Error deleting local file for streaming item: ${item.title}", e)
         }
     }
 
@@ -328,9 +344,13 @@ class SongRepository(
     suspend fun deleteSong(songId: Int) {
         val song = songDao.getSongByIdSync(songId)
         song?.let {
-            val file = File(it.audioUri)
-            if (file.exists()) {
-                file.delete()
+            try {
+                val file = File(it.audioUri)
+                if (file.exists() && !file.delete()) {
+                    file.deleteOnExit()
+                }
+            } catch (e: Exception) {
+                Log.e("SongRepository", "Failed to delete audio file: ${it.audioUri}", e)
             }
         }
         songDao.deleteSong(songId)
@@ -342,6 +362,10 @@ class SongRepository(
 
     suspend fun updatePlaylistPositions(playlists: List<Playlist>) {
         playlistDao.updatePlaylists(playlists)
+    }
+
+    suspend fun getSongIdsForPlaylist(playlistId: Int): List<Int> = withContext(Dispatchers.IO) {
+        playlistDao.getSongIdsForPlaylist(playlistId)
     }
 
     suspend fun deletePlaylist(playlistId: Int) {

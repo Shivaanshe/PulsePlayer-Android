@@ -696,6 +696,28 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     newPlaylistHeader = state.newHeader,
                     newTracks = state.newTracks
                 )
+
+                if (_pendingDownloadItems.value.isNotEmpty()) {
+                    val pending = _pendingDownloadItems.value
+                    _pendingDownloadItems.value = emptyList()
+
+                    val existingTracks = repository.getItemsForPlaylistSync(state.existingPlaylist.youtubeUrl)
+                    val existingUrls = existingTracks.map { it.youtubeUrl }.toSet()
+                    val missingDownloadItems = pending.filter { !existingUrls.contains(it.youtubeUrl) }
+
+                    missingDownloadItems.forEach { item ->
+                        val request = DownloadRequest(
+                            url = item.youtubeUrl,
+                            isLibrary = true,
+                            overrideTitle = item.title,
+                            overrideArtist = item.artist,
+                            overrideImageUrl = item.thumbnailUrl,
+                            playlistId = if (state.existingPlaylist.id > 0) state.existingPlaylist.id else null
+                        )
+                        enqueueDownloadRequest(request)
+                    }
+                }
+
                 _duplicatePlaylistState.value = DuplicatePlaylistState.Idle
             }
         }
@@ -1753,14 +1775,44 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 if (isCollection) {
                     val playlistHeader = items.find { it.isPlaylist } ?: items.firstOrNull()
                     val collectionTitle = playlistHeader?.title ?: ""
+                    val cleanUrl = com.example.song.util.SpotifyResolver.sanitizeUrl(playlistHeader?.youtubeUrl ?: sanitizedUrl)
+                    val sanitizedHeader = playlistHeader?.copy(youtubeUrl = cleanUrl) ?: StreamingItem(title = collectionTitle, youtubeUrl = cleanUrl, thumbnailUrl = playlistHeader?.thumbnailUrl, isPlaylist = true)
+                    val sanitizedItems = items.map { item ->
+                        if (item.isPlaylist) sanitizedHeader else item.copy(parentPlaylistUrl = cleanUrl)
+                    }
+                    val newTracks = sanitizedItems.filter { !it.isPlaylist }
 
-                    val existingPlaylist = _playlists.value.find { 
+                    val existingRoomPlaylist = _playlists.value.find { 
                         it.name.equals(collectionTitle, ignoreCase = true) 
                     }
-                    if (existingPlaylist != null && collectionTitle.isNotBlank()) {
-                        _downloadState.value = DownloadState.Idle
-                        _uiEvent.emit("This playlist is already in your library!")
-                        return@launch
+                    val existingStreamingPlaylist = repository.getPlaylistByUrl(cleanUrl)
+
+                    val existingCount = if (existingRoomPlaylist != null) {
+                        repository.getSongIdsForPlaylist(existingRoomPlaylist.id).size
+                    } else if (existingStreamingPlaylist != null) {
+                        repository.getItemsForPlaylistSync(cleanUrl).size
+                    } else {
+                        0
+                    }
+
+                    if (existingRoomPlaylist != null || existingStreamingPlaylist != null) {
+                        _pendingDownloadItems.value = newTracks
+
+                        if (existingCount == newTracks.size) {
+                            _downloadState.value = DownloadState.Idle
+                            _duplicatePlaylistState.value = DuplicatePlaylistState.AlreadyExists(collectionTitle)
+                            return@launch
+                        } else {
+                            _downloadState.value = DownloadState.Idle
+                            _duplicatePlaylistState.value = DuplicatePlaylistState.UpdateAvailable(
+                                existingPlaylist = existingStreamingPlaylist ?: StreamingItem(id = existingRoomPlaylist?.id ?: 0, title = collectionTitle, youtubeUrl = cleanUrl, thumbnailUrl = playlistHeader?.thumbnailUrl, isPlaylist = true),
+                                newHeader = sanitizedHeader,
+                                newTracks = newTracks,
+                                existingCount = existingCount,
+                                newCount = newTracks.size
+                            )
+                            return@launch
+                        }
                     }
                 }
 
