@@ -266,9 +266,16 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
         }
     }
 
-    // Screens where bottom bar should be visible
-    val mainScreens = listOf("main") // Top-level screen containing the pager
-    val showBottomBar = currentDestination?.route in mainScreens
+    // Determine which screens should hide the bottom bar.
+    // The player screen should hide it.
+    // Add any other full-screen routes here if necessary.
+    val hideBottomBarRoutes = listOf("player") 
+    
+    // Check if the current route starts with any of the hidden routes.
+    // This handles routes with arguments like "playlist/{id}".
+    val showBottomBar = currentDestination?.route?.let { route ->
+        hideBottomBarRoutes.none { route.startsWith(it) }
+    } ?: true
 
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
