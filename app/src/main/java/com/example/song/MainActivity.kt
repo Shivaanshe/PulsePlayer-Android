@@ -29,9 +29,12 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.navigation.NavController
@@ -156,9 +159,13 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+val LocalBottomBarHeight = compositionLocalOf { 0.dp }
+
 @Composable
 fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
     val context = LocalContext.current
+    val density = LocalDensity.current
+    var bottomBarHeight by remember { mutableStateOf(0.dp) }
 
     LaunchedEffect(viewModel.uiEvent) {
         viewModel.uiEvent.collect { message ->
@@ -324,7 +331,12 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
                     containerColor = Color.Transparent,
                     bottomBar = {
                         if (showBottomBar) {
-                            Column(modifier = Modifier.navigationBarsPadding()) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .navigationBarsPadding()
+                                    .onSizeChanged { bottomBarHeight = with(density) { it.height.toDp() } }
+                            ) {
                                 if (currentDestination?.route != "player" && effectiveSong != null) {
                                     NowPlayingBar(
                                         song = effectiveSong,
@@ -347,12 +359,19 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
                         }
                     }
                 ) { innerPadding ->
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(if (showBottomBar) innerPadding else PaddingValues())
+                    CompositionLocalProvider(
+                        LocalBottomBarHeight provides (if (showBottomBar) bottomBarHeight else 0.dp)
                     ) {
-                        NavHost(
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(
+                                    if (showBottomBar) PaddingValues(top = innerPadding.calculateTopPadding())
+                                    else PaddingValues()
+                                )
+                                .consumeWindowInsets(WindowInsets.navigationBars)
+                        ) {
+                            NavHost(
                             navController = navController,
                             startDestination = "main",
                             modifier = Modifier.fillMaxSize(),
@@ -397,6 +416,7 @@ fun MainApp(viewModel: SongViewModel, otaViewModel: OtaUpdateViewModel) {
                         }
                     }
                 }
+            }
             }
 
             // --- OTA MODAL DIALOGS ---

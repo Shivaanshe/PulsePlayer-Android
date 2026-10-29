@@ -55,6 +55,7 @@ import kotlin.math.roundToInt
 import androidx.compose.ui.unit.sp
 import androidx.media3.common.util.UnstableApi
 import coil.compose.AsyncImage
+import com.example.song.LocalBottomBarHeight
 import com.example.song.SongApplication
 import com.example.song.data.model.StreamingItem
 import com.example.song.util.dragGestureHandler
@@ -443,7 +444,7 @@ fun DiscoverScreen(
                         onReorderStart = { key, fingerY, itemTop -> if (key is Int) { val index = localSingleSongs.indexOfFirst { it.id == key }; if (index != -1) { draggedItemIndex = index; activeDraggedItem = localSingleSongs[index]; targetIndex = index; currentDragY = fingerY; itemTouchOffset = fingerY - itemTop } } },
                         onReorderUpdate = { y -> currentDragY = y; if (draggedItemIndex != null) { val info = listState.layoutInfo; val itemUnderFinger = info.visibleItemsInfo.find { y.toInt() in it.offset..(it.offset + it.size) }; itemUnderFinger?.let { hitItem -> val newTarget = localSingleSongs.indexOfFirst { it.id == hitItem.key }; if (newTarget != -1 && newTarget != targetIndex) targetIndex = newTarget } } },
                         onReorderEnd = { if (draggedItemIndex != null && targetIndex != null) { isManualOrder = true; val mutable = localSingleSongs.toMutableList(); val item = mutable.removeAt(draggedItemIndex!!); mutable.add(targetIndex!!, item); localSingleSongs = mutable; viewModel.updateStreamingItems(localSingleSongs.mapIndexed { index, si -> si.copy(position = index) }); scope.launch { delay(800); isManualOrder = false } }; draggedItemIndex = null; activeDraggedItem = null; targetIndex = null }
-                    ), contentPadding = PaddingValues(bottom = 80.dp)) {
+                    ), contentPadding = PaddingValues(bottom = LocalBottomBarHeight.current + 16.dp)) {
                         if (playlists.isNotEmpty()) {
                             item {
                                 Column(modifier = Modifier.padding(vertical = 16.dp)) {
@@ -641,7 +642,7 @@ fun DiscoverScreen(
                         onReorderStart = { key, fingerY, itemTop -> if (key is Int) { val index = localPlaylistItems.indexOfFirst { it.id == key }; if (index != -1) { draggedItemIndex = index; activeDraggedItem = localPlaylistItems[index]; targetIndex = index; currentDragY = fingerY; itemTouchOffset = fingerY - itemTop } } },
                         onReorderUpdate = { y -> currentDragY = y; if (draggedItemIndex != null) { val info = listState.layoutInfo; val itemUnderFinger = info.visibleItemsInfo.find { y.toInt() in it.offset..(it.offset + it.size) }; itemUnderFinger?.let { hitItem -> val newTarget = localPlaylistItems.indexOfFirst { it.id == hitItem.key }; if (newTarget != -1 && newTarget != targetIndex) targetIndex = newTarget } } },
                         onReorderEnd = { if (draggedItemIndex != null && targetIndex != null) { isManualOrder = true; val mutable = localPlaylistItems.toMutableList(); val item = mutable.removeAt(draggedItemIndex!!); mutable.add(targetIndex!!, item); localPlaylistItems = mutable; viewModel.updateStreamingItems(localPlaylistItems.mapIndexed { index, si -> si.copy(position = index) }); scope.launch { delay(800); isManualOrder = false } }; draggedItemIndex = null; activeDraggedItem = null; targetIndex = null }
-                    ), contentPadding = PaddingValues(bottom = 80.dp)) {
+                    ), contentPadding = PaddingValues(bottom = LocalBottomBarHeight.current + 16.dp)) {
                         item {
                             val playlistCover = selectedPlaylist?.thumbnailUrl
                                 ?: localPlaylistItems.firstOrNull { !it.thumbnailUrl.isNullOrEmpty() }?.thumbnailUrl

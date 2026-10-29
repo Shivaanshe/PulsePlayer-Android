@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import com.example.song.LocalBottomBarHeight
 import com.example.song.data.model.Song
 import com.example.song.ui.components.SongListItem
 import com.example.song.util.dragGestureHandler
@@ -108,7 +109,7 @@ fun FavoritesScreen(viewModel: SongViewModel, onSongClick: () -> Unit) {
                     onReorderStart = { key, fingerY, itemTop -> if (key is Int) { val index = localSongs.indexOfFirst { it.id == key }; if (index != -1) { draggedItemIndex = index; activeDraggedItem = localSongs[index]; targetIndex = index; currentDragY = fingerY; itemTouchOffset = fingerY - itemTop } } },
                     onReorderUpdate = { y -> currentDragY = y; if (draggedItemIndex != null) { val info = listState.layoutInfo; val itemUnderFinger = info.visibleItemsInfo.find { y.toInt() in it.offset..(it.offset + it.size) }; itemUnderFinger?.let { hitItem -> val hitKey = hitItem.key; if (hitKey is Int) { val newTarget = localSongs.indexOfFirst { it.id == hitKey }; if (newTarget != -1 && newTarget != targetIndex) targetIndex = newTarget } } } },
                     onReorderEnd = { if (draggedItemIndex != null && targetIndex != null) { isManualOrder = true; val mutable = localSongs.toMutableList(); val song = mutable.removeAt(draggedItemIndex!!); mutable.add(targetIndex!!, song); localSongs = mutable; viewModel.reorderFavorites(localSongs); scope.launch { delay(800); isManualOrder = false } }; draggedItemIndex = null; activeDraggedItem = null; targetIndex = null }
-                ), contentPadding = PaddingValues(bottom = 80.dp)) {
+                ), contentPadding = PaddingValues(bottom = LocalBottomBarHeight.current + 16.dp)) {
                     itemsIndexed(localSongs, key = { _, song -> song.id }) { index, song ->
                         val isDragging = draggedItemIndex == index
                         val itemHeightPx = measuredItemHeightPx

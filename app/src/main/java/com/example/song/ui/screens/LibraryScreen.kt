@@ -52,6 +52,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import coil.compose.AsyncImage
 import com.example.song.SongApplication
 import com.example.song.data.model.Playlist
+import com.example.song.LocalBottomBarHeight
 import com.example.song.data.model.Song
 import com.example.song.ui.components.SongListItem
 import com.example.song.util.dragGestureHandler
@@ -347,7 +348,7 @@ fun LibraryScreen(
                     onReorderStart = { key, fingerY, itemTop -> if (key is Int) { val index = songs.indexOfFirst { it.id == key }; if (index != -1) { draggedItemIndex = index; activeDraggedItem = songs[index]; targetIndex = index; currentDragY = fingerY; itemTouchOffset = fingerY - itemTop } } },
                     onReorderUpdate = { y -> currentDragY = y; if (draggedItemIndex != null) { val info = listState.layoutInfo; val itemUnderFinger = info.visibleItemsInfo.find { y.toInt() in it.offset..(it.offset + it.size) }; itemUnderFinger?.let { hitItem -> val hitKey = hitItem.key; if (hitKey is Int) { val newTarget = songs.indexOfFirst { it.id == hitKey }; if (newTarget != -1 && newTarget != targetIndex) targetIndex = newTarget } } } },
                     onReorderEnd = { if (draggedItemIndex != null && targetIndex != null) { isManualOrder = true; val mutable = songs.toMutableList(); val song = mutable.removeAt(draggedItemIndex!!); mutable.add(targetIndex!!, song); viewModel.updateSongs(mutable.mapIndexed { index, item -> item.copy(position = index) }); scope.launch { delay(800); isManualOrder = false } }; draggedItemIndex = null; activeDraggedItem = null; targetIndex = null }
-                ), contentPadding = PaddingValues(bottom = 80.dp)) {
+                ), contentPadding = PaddingValues(bottom = LocalBottomBarHeight.current + 16.dp)) {
                     if (!isSearching) {
                         item {
                             Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {

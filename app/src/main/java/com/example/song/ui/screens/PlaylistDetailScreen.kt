@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.media3.common.Player
+import com.example.song.LocalBottomBarHeight
 import com.example.song.data.model.Song
 import com.example.song.ui.components.ImmersivePlaylistHeader
 import com.example.song.ui.components.SongListItem
@@ -171,7 +172,7 @@ fun PlaylistDetailScreen(
                                 targetIndex = null
                             }
                         ),
-                    contentPadding = PaddingValues(bottom = 80.dp)
+                    contentPadding = PaddingValues(bottom = LocalBottomBarHeight.current + 16.dp)
                 ) {
                     item {
                         Box(
