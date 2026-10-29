@@ -1,6 +1,7 @@
 package com.example.song.ui.components
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -43,9 +44,10 @@ fun NowPlayingBar(
             .height(76.dp)
             .padding(horizontal = 12.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(20.dp))
+            .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
             .spotlightTarget(TourStep.STEP_6_NOW_PLAYING, spotlightController)
             .clickable { onClick() },
-        color = Color.White.copy(alpha = 0.6f),
+        color = Color(0xFF1E1E26),
         tonalElevation = 0.dp
     ) {
         Row(
@@ -71,7 +73,8 @@ fun NowPlayingBar(
                     text = song.title,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
+                        fontSize = 15.sp,
+                        color = Color.White
                     ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -79,7 +82,7 @@ fun NowPlayingBar(
                 Text(
                     text = song.artist,
                     style = MaterialTheme.typography.bodySmall.copy(
-                        color = Color.DarkGray,
+                        color = Color.White.copy(alpha = 0.65f),
                         fontSize = 13.sp
                     ),
                     maxLines = 1,

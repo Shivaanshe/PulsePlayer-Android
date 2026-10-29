@@ -57,7 +57,7 @@ fun GlassNavigationBar(
                 .height(containerHeight)
                 .clip(RoundedCornerShape(32.dp))
                 .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp)),
-            color = Color.White.copy(alpha = 0.2f),
+            color = Color(0xFF1E1E26),
             tonalElevation = 0.dp
         ) {
             Box(modifier = Modifier.padding(horizontal = 8.dp).wrapContentSize()) {
@@ -135,7 +135,7 @@ fun GlassNavigationRail(
                 .wrapContentHeight()
                 .clip(RoundedCornerShape(32.dp))
                 .border(1.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp)),
-            color = Color.White.copy(alpha = 0.2f),
+            color = Color(0xFF1E1E26),
             tonalElevation = 0.dp
         ) {
             Box(modifier = Modifier.padding(vertical = 12.dp).wrapContentSize()) {
