@@ -665,11 +665,12 @@ fun DiscoverScreen(
                                 },
                                 onShuffleClick = {
                                     if (localPlaylistItems.isNotEmpty()) {
-                                        val shuffled = localPlaylistItems.shuffled()
+                                        viewModel.setShuffle(true)
+                                        val randomItem = localPlaylistItems.random()
                                         viewModel.playStreamingItem(
-                                            item = shuffled.first(),
-                                            queue = shuffled,
-                                            contextTitle = "Shuffled - ${selectedPlaylist?.title ?: "Playlist"}"
+                                            item = randomItem,
+                                            queue = localPlaylistItems,
+                                            contextTitle = selectedPlaylist?.title ?: "Playlist"
                                         )
                                         onSongClick()
                                     }

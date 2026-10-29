@@ -238,8 +238,9 @@ fun PlaylistDetailScreen(
                             },
                             onShuffleClick = {
                                 if (localSongsInPlaylist.isNotEmpty()) {
-                                    val shuffled = localSongsInPlaylist.shuffled()
-                                    viewModel.playSong(shuffled.first(), shuffled)
+                                    viewModel.setShuffle(true)
+                                    val randomSong = localSongsInPlaylist.random()
+                                    viewModel.playSong(randomSong, localSongsInPlaylist)
                                     onSongClick()
                                 }
                             }

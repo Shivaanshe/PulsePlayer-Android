@@ -1460,12 +1460,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         // 🛡️ CRITICAL ORDER RULE: Manual items MUST play in exact user-queued order BEFORE parent items!
-        val combinedSongs = if (_isShuffleEnabled.value) {
-            val shuffledParentSongs = parentItems.map { it.song }.shuffled()
-            listOfNotNull(activeSong) + manualItems.map { it.song } + shuffledParentSongs
-        } else {
-            listOfNotNull(activeSong) + manualItems.map { it.song } + parentItems.map { it.song }
-        }
+        val combinedSongs = listOfNotNull(activeSong) + manualItems.map { it.song } + parentItems.map { it.song }
 
         _currentQueue.value = combinedSongs
 
@@ -1489,7 +1484,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         _historyStack.value = pastSongs
 
         // 2. Remaining upcoming songs go to parent queue
-        val remainingSongs = if (index + 1 < queue.size) queue.subList(index + 1, queue.size) else emptyList()
+        var remainingSongs = if (index + 1 < queue.size) queue.subList(index + 1, queue.size) else emptyList()
+        if (_isShuffleEnabled.value && remainingSongs.size > 1) {
+            remainingSongs = remainingSongs.shuffled()
+        }
         _parentQueue.value = remainingSongs.map { QueueItem(song = it, isUserQueued = false) }
 
         _currentPlayingSong.value = song
@@ -1572,7 +1570,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         _historyStack.value = pastSongs
 
         // 2. Remaining upcoming songs go to parent queue
-        val remainingSongs = if (index + 1 < mappedQueue.size) mappedQueue.subList(index + 1, mappedQueue.size) else emptyList()
+        var remainingSongs = if (index + 1 < mappedQueue.size) mappedQueue.subList(index + 1, mappedQueue.size) else emptyList()
+        if (_isShuffleEnabled.value && remainingSongs.size > 1) {
+            remainingSongs = remainingSongs.shuffled()
+        }
         _parentQueue.value = remainingSongs.map { QueueItem(song = it, isUserQueued = false) }
 
         _currentPlayingSong.value = targetSong
@@ -1776,10 +1777,21 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         recomputeCombinedQueue()
     }
 
-    fun toggleShuffle() {
-        val newShuffleState = !_isShuffleEnabled.value
-        _isShuffleEnabled.value = newShuffleState
+    fun setShuffle(enabled: Boolean) {
+        if (_isShuffleEnabled.value == enabled) return
+        _isShuffleEnabled.value = enabled
+        
+        if (enabled) {
+            _parentQueue.value = _parentQueue.value.shuffled()
+        } else {
+            val sourceOrder = _sourcePlaylist.value.mapIndexed { index, song -> song.id to index }.toMap()
+            _parentQueue.value = _parentQueue.value.sortedBy { sourceOrder[it.song.id] ?: Int.MAX_VALUE }
+        }
         recomputeCombinedQueue()
+    }
+
+    fun toggleShuffle() {
+        setShuffle(!_isShuffleEnabled.value)
     }
 
     fun setSleepTimer(minutes: Int) {
