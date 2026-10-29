@@ -208,7 +208,7 @@ class MusicService : MediaSessionService() {
                                         .setKey(mediaId)
                                         .build()
                                 } else {
-                                    PulseLogger.log("JIT Resolution FAILED for: $query", isError = true)
+                                    PulseLogger.log("JIT Resolution FAILED for: $query", isError = false)
                                     throw IOException("JIT stream resolution failed for query: $query")
                                 }
                             }
@@ -323,7 +323,18 @@ class MusicService : MediaSessionService() {
                 val currentMediaItem = player.currentMediaItem
                 val query = currentMediaItem?.localConfiguration?.uri?.getQueryParameter("query")
                 
-                PulseLogger.log("ExoPlayer error in MusicService: ${error.errorCodeName} (${error.message})", isError = true)
+                val isRecoverableIoError = error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED || 
+                                           error.cause is java.io.IOException
+
+                if (isRecoverableIoError) {
+                    // Log as Warning/Info to avoid triggering Firebase Crashlytics
+                    PulseLogger.log("Recoverable ExoPlayer IO/Source error: ${error.errorCodeName}. Auto-recovering...", isError = false)
+                    Log.w("MusicService", "ExoPlayer source error intercepted: ${error.message}")
+                } else {
+                    // Log genuine crashes to Crashlytics
+                    PulseLogger.log("ExoPlayer error in MusicService: ${error.errorCodeName} (${error.message})", isError = true)
+                    Log.e("MusicService", "Engine error: ${error.message}", error)
+                }
                 
                 if (!query.isNullOrEmpty() && isSourceOrNetworkError(error)) {
                     PulseLogger.log("Source/network error for JIT track: $query. Invalidating cache & re-resolving...")
@@ -332,14 +343,16 @@ class MusicService : MediaSessionService() {
                     return
                 }
 
-                CrashTracker.recordException(
-                    throwable = error,
-                    breadcrumb = "ExoPlayer error in MusicService",
-                    customKeys = mapOf(
-                        "error_code" to error.errorCodeName,
-                        "media_id" to (currentMediaItem?.mediaId ?: "unknown")
+                if (!isRecoverableIoError) {
+                    CrashTracker.recordException(
+                        throwable = error,
+                        breadcrumb = "ExoPlayer error in MusicService",
+                        customKeys = mapOf(
+                            "error_code" to error.errorCodeName,
+                            "media_id" to (currentMediaItem?.mediaId ?: "unknown")
+                        )
                     )
-                )
+                }
 
                 if (player.hasNextMediaItem()) {
                     PulseLogger.log("Skipping unplayable track to next item")
