@@ -323,8 +323,13 @@ class MusicService : MediaSessionService() {
                 val currentMediaItem = player.currentMediaItem
                 val query = currentMediaItem?.localConfiguration?.uri?.getQueryParameter("query")
                 
-                val isRecoverableIoError = error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED || 
-                                           error.cause is java.io.IOException
+                val errorString = error.stackTraceToString()
+                val isRecoverableIoError = error.errorCode == PlaybackException.ERROR_CODE_IO_UNSPECIFIED ||
+                                           error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                                           error.cause is java.io.EOFException ||
+                                           errorString.contains("EOFException") ||
+                                           errorString.contains("JIT stream resolution failed") ||
+                                           errorString.contains("UnknownHostException")
 
                 if (isRecoverableIoError) {
                     // Log as Warning/Info to avoid triggering Firebase Crashlytics
