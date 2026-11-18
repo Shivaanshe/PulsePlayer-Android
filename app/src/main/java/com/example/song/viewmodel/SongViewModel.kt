@@ -363,18 +363,33 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                if (preflight.route == com.example.song.data.crawler.SpotifyCrawlPipeline.PreflightRoute.LIGHTWEIGHT_PARSER) {
-                    _extractionStatus.value = "Resolving Spotify tracks..."
-                    val items = SpotifyResolver.resolve(preflight.cleanUrl, repository)
-                    if (items.isNotEmpty()) {
-                        _pendingStreamingItems.value = items
-                        return@launch
-                    }
+                // Attempt lightweight resolution first for ALL playlists
+                _extractionStatus.value = "Resolving Spotify tracks..."
+                val resolvedItems = try {
+                    SpotifyResolver.resolve(preflight.cleanUrl, repository)
+                } catch (e: Exception) {
+                    emptyList()
                 }
 
+                val expCount = preflight.expectedCount
+                val trackCount = resolvedItems.count { !it.isPlaylist }
+
+                // Check if lightweight parser fetched the full playlist (<= 100 songs or count <= 100)
+                val isSmallPlaylist = when {
+                    expCount != null -> expCount <= 100
+                    resolvedItems.isNotEmpty() && trackCount < 100 -> true
+                    else -> false
+                }
+
+                if (isSmallPlaylist && resolvedItems.isNotEmpty()) {
+                    _pendingStreamingItems.value = resolvedItems
+                    return@launch
+                }
+
+                // Crawler ONLY wakes up for Spotify playlists with > 100 songs
                 repository.spotifyCrawlPipeline.prepareCrawl(
                     playlistId = preflight.playlistId,
-                    initialExpectedCount = preflight.expectedCount,
+                    initialExpectedCount = expCount,
                     title = preflight.title
                 )
                 _activeSpotifyCrawlUrl.value = preflight.cleanUrl

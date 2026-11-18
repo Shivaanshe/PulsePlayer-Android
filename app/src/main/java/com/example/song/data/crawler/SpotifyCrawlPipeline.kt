@@ -360,11 +360,26 @@ class SpotifyCrawlPipeline(
         val descMatch = Pattern.compile("<meta property=\"og:description\" content=\"(.*?)\"").matcher(html)
         val desc = if (descMatch.find()) descMatch.group(1) else ""
 
-        val countMatch = Pattern.compile("([0-9][0-9,.\\s\\u00a0]*)\\s*(songs|items|tracks)", Pattern.CASE_INSENSITIVE).matcher(desc)
-        val count = if (countMatch.find()) {
-            val numStr = countMatch.group(1)?.replace("[^0-9]".toRegex(), "") ?: ""
-            numStr.toIntOrNull()
-        } else null
+        // 1. Try explicit music:song_count meta tag
+        val songCountMeta = Pattern.compile("<meta (?:name|property)=\"(?:music:song_count|spotify:song_count)\" content=\"(\\d+)\"").matcher(html)
+        var count: Int? = if (songCountMeta.find()) songCountMeta.group(1)?.toIntOrNull() else null
+
+        // 2. Try description regex matching song count
+        if (count == null && desc.isNotEmpty()) {
+            val countMatch = Pattern.compile("([0-9][0-9,.\\s\\u00a0]*)\\s*(songs|items|tracks|canciones|titres|titel|曲)", Pattern.CASE_INSENSITIVE).matcher(desc)
+            if (countMatch.find()) {
+                val numStr = countMatch.group(1)?.replace("[^0-9]".toRegex(), "") ?: ""
+                count = numStr.toIntOrNull()
+            }
+        }
+
+        // 3. Fallback generic number pattern from description
+        if (count == null && desc.isNotEmpty()) {
+            val genericMatch = Pattern.compile("([0-9]+)\\s*(?:songs?|tracks?|items?|canciones|titres)?", Pattern.CASE_INSENSITIVE).matcher(desc)
+            if (genericMatch.find()) {
+                count = genericMatch.group(1)?.toIntOrNull()
+            }
+        }
 
         return Pair(title, count)
     }
