@@ -71,4 +71,13 @@ interface StreamingDao {
 
     @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl IS NULL AND isPlaylist = 0")
     suspend fun getAllTopLevelSingleSongsSync(): List<StreamingItem>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSyncTombstone(tombstone: com.example.song.data.model.SyncTombstone)
+
+    @Query("SELECT trackUrl FROM sync_tombstones WHERE playlistUrl = :playlistUrl")
+    suspend fun getTombstonesForPlaylist(playlistUrl: String): List<String>
+
+    @Query("UPDATE streaming_items SET lastSyncedAt = :timestamp WHERE id = :itemId")
+    suspend fun updateLastSyncedAt(itemId: Int, timestamp: Long)
 }

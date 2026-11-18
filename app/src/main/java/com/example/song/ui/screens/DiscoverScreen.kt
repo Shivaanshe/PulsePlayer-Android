@@ -647,6 +647,8 @@ fun DiscoverScreen(
                             val playlistCover = selectedPlaylist?.thumbnailUrl
                                 ?: localPlaylistItems.firstOrNull { !it.thumbnailUrl.isNullOrEmpty() }?.thumbnailUrl
                             val totalDurationMs = remember(localPlaylistItems) { localPlaylistItems.sumOf { it.duration } }
+                            val isSyncing by viewModel.isSyncing.collectAsState()
+                            val canSync = selectedPlaylist != null && !(selectedPlaylist!!.youtubeUrl.contains("spotify.com") && localPlaylistItems.size > 100)
                             
                             ImmersivePlaylistHeader(
                                 title = if (isArrangeModeEnabled) "Arrange Songs" else (selectedPlaylist?.title ?: "Playlist"),
@@ -676,7 +678,10 @@ fun DiscoverScreen(
                                         onSongClick()
                                     }
                                 },
-                                onAddClick = { showAddSongDialog = true }
+                                onAddClick = { showAddSongDialog = true },
+                                onSyncClick = if (canSync) { { selectedPlaylist?.let { viewModel.syncCollection(it) } } } else null,
+                                lastSyncedAt = selectedPlaylist?.lastSyncedAt,
+                                isSyncing = isSyncing
                             )
 
                             Row(

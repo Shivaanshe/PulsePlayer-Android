@@ -444,6 +444,22 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    private val _isSyncing = MutableStateFlow(false)
+    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+
+    fun syncCollection(playlist: StreamingItem) {
+        viewModelScope.launch {
+            _isSyncing.value = true
+            try {
+                repository.syncPlaylist(playlist)
+            } catch (e: Exception) {
+                Log.e("SongViewModel", "Error syncing playlist", e)
+            } finally {
+                _isSyncing.value = false
+            }
+        }
+    }
+
     private val _isOnlineSearching = MutableStateFlow(false)
     val isOnlineSearching: StateFlow<Boolean> = _isOnlineSearching.asStateFlow()
 

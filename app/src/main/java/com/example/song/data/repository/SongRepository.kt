@@ -255,6 +255,76 @@ class SongRepository(
         streamingDao.insertItems(updatedOrNewTracks)
     }
 
+    private fun String.toCoreTitle(): String {
+        return this.lowercase()
+            .substringBefore("|")
+            .substringBefore("(")
+            .substringBefore("[")
+            .substringBefore("-")
+            .replace(Regex("[^a-z0-9]"), "")
+            .trim()
+    }
+
+    private fun String.extractYoutubeVideoId(): String {
+        return if (this.contains("v=")) {
+            this.substringAfter("v=").substringBefore("&")
+        } else if (this.contains("youtu.be/")) {
+            this.substringAfter("youtu.be/").substringBefore("?")
+        } else {
+            this
+        }
+    }
+
+    suspend fun syncPlaylist(playlist: StreamingItem): Boolean = withContext(Dispatchers.IO) {
+        if (!playlist.isPlaylist) return@withContext false
+        
+        val freshTracks = if (playlist.youtubeUrl.contains("spotify.com")) {
+            val resolved = com.example.song.util.SpotifyResolver.resolve(playlist.youtubeUrl, this@SongRepository)
+            if (resolved.size <= 1) return@withContext false // Escape single-track collection
+            resolved.filter { !it.isPlaylist }
+        } else {
+            val resolved = com.example.song.util.YoutubeStreamHandler.getMetadata(playlist.youtubeUrl)
+            resolved.filter { !it.isPlaylist }
+        }
+        
+        val existingTracks = streamingDao.getItemsForPlaylistSync(playlist.youtubeUrl)
+        val tombstonedUrls = streamingDao.getTombstonesForPlaylist(playlist.youtubeUrl).toSet()
+        
+        val existingCoreTitles = existingTracks.map { it.title.toCoreTitle() }.toSet()
+        val existingVideoIds = existingTracks.map { it.youtubeUrl.extractYoutubeVideoId() }.toSet()
+        
+        val maxExistingPosition = existingTracks.maxOfOrNull { it.position } ?: -1
+        
+        var nextPosition = maxExistingPosition + 1
+        val tracksToInsert = mutableListOf<StreamingItem>()
+        
+        freshTracks.forEach { newTrack ->
+            val trackVideoId = newTrack.youtubeUrl.extractYoutubeVideoId()
+            val trackCoreTitle = newTrack.title.toCoreTitle()
+            
+            val isDuplicate = existingVideoIds.contains(trackVideoId) || existingCoreTitles.contains(trackCoreTitle)
+            val isTombstoned = tombstonedUrls.contains(newTrack.youtubeUrl) || tombstonedUrls.contains(trackVideoId)
+            
+            if (!isDuplicate && !isTombstoned) {
+                tracksToInsert.add(
+                    newTrack.copy(
+                        id = 0,
+                        parentPlaylistUrl = playlist.youtubeUrl,
+                        position = nextPosition++
+                    )
+                )
+            }
+        }
+        
+        if (tracksToInsert.isNotEmpty()) {
+            streamingDao.insertItems(tracksToInsert)
+        }
+        
+        val now = System.currentTimeMillis()
+        streamingDao.updateLastSyncedAt(playlist.id, now)
+        return@withContext true
+    }
+
     suspend fun insertStreamingItems(items: List<StreamingItem>) {
         streamingDao.insertItems(items)
     }
@@ -272,6 +342,14 @@ class SongRepository(
             streamingDao.deletePlaylistItems(item.youtubeUrl)
         } else {
             deleteLocalFileForStreamingItem(item)
+            if (item.parentPlaylistUrl != null) {
+                streamingDao.insertSyncTombstone(
+                    com.example.song.data.model.SyncTombstone(
+                        playlistUrl = item.parentPlaylistUrl,
+                        trackUrl = item.youtubeUrl
+                    )
+                )
+            }
         }
         streamingDao.deleteItem(item)
     }

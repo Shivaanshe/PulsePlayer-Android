@@ -16,6 +16,7 @@ import com.example.song.data.model.PlaylistSongCrossRef
 import com.example.song.data.model.StreamingItem
 import com.example.song.data.model.PlaylistEntity
 import com.example.song.data.model.PlaylistTrackEntity
+import com.example.song.data.model.SyncTombstone
 
 @Database(
     entities = [
@@ -24,9 +25,10 @@ import com.example.song.data.model.PlaylistTrackEntity
         PlaylistSongCrossRef::class,
         StreamingItem::class,
         PlaylistEntity::class,
-        PlaylistTrackEntity::class
+        PlaylistTrackEntity::class,
+        SyncTombstone::class
     ],
-    version = 12,
+    version = 13,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -99,6 +101,21 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `streaming_items` ADD COLUMN `lastSyncedAt` INTEGER")
+                db.execSQL(
+                    """
+                    CREATE TABLE IF NOT EXISTS `sync_tombstones` (
+                        `playlistUrl` TEXT NOT NULL,
+                        `trackUrl` TEXT NOT NULL,
+                        PRIMARY KEY(`playlistUrl`, `trackUrl`)
+                    )
+                    """.trimIndent()
+                )
+            }
+        }
+
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -106,7 +123,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "song_database"
                 )
-                .addMigrations(MIGRATION_10_11, MIGRATION_11_12)
+                .addMigrations(MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                 .fallbackToDestructiveMigrationOnDowngrade()
                 .build()
                 INSTANCE = instance

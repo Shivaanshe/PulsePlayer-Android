@@ -18,5 +18,6 @@ data class StreamingItem(
     val parentPlaylistUrl: String? = null,
     val duration: Long = 0L,
     val isFavorite: Boolean = false,
-    val position: Int = 0
+    val position: Int = 0,
+    val lastSyncedAt: Long? = null
 ) : Parcelable
