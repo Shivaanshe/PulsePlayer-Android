@@ -103,9 +103,12 @@ fun DiscoverScreen(
     var showAddMenu by remember { mutableStateOf(false) }
     var showAddDialog by remember { mutableStateOf(false) }
     var youtubeUrl by remember { mutableStateOf("") }
-    var selectedPlaylist by rememberSaveable { mutableStateOf<StreamingItem?>(null) }
-    BackHandler(enabled = selectedPlaylist != null) {
-        selectedPlaylist = null
+    var selectedPlaylistUrl by rememberSaveable { mutableStateOf<String?>(null) }
+    val selectedPlaylist = remember(selectedPlaylistUrl, items) {
+        items.find { it.youtubeUrl == selectedPlaylistUrl }
+    }
+    BackHandler(enabled = selectedPlaylistUrl != null) {
+        selectedPlaylistUrl = null
     }
 
     LaunchedEffect(searchQuery) {
@@ -164,7 +167,7 @@ fun DiscoverScreen(
                 if (selectedPlaylist != null) {
                     CenterAlignedTopAppBar(colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                         title = { Text(if (isArrangeModeEnabled) "Arrange Songs" else selectedPlaylist?.title ?: "Playlist", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        navigationIcon = { if (!isArrangeModeEnabled) { IconButton(onClick = { selectedPlaylist = null }, modifier = Modifier.padding(8.dp).background(Color.White.copy(alpha = 0.3f), CircleShape)) { Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF424242)) } } },
+                        navigationIcon = { if (!isArrangeModeEnabled) { IconButton(onClick = { selectedPlaylistUrl = null }, modifier = Modifier.padding(8.dp).background(Color.White.copy(alpha = 0.3f), CircleShape)) { Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF424242)) } } },
                         actions = { if (isArrangeModeEnabled) { TextButton(onClick = { viewModel.toggleArrangeMode(false) }, modifier = Modifier.padding(end = 8.dp)) { Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63)) } } }
                     )
                 } else {
@@ -542,7 +545,7 @@ fun DiscoverScreen(
                                                         }
                                                     }
                                                     Box(modifier = Modifier.graphicsLayer { alpha = if (isDragging) 0f else 1f }) {
-                                                        StreamingPlaylistCard(item = playlist, isSelected = selectedStreamingIds.contains(playlist.id), selectionMode = isSelectionMode, onClick = { if (isSelectionMode) viewModel.toggleStreamingSelection(playlist.id) else selectedPlaylist = playlist }, onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleStreamingSelection(playlist.id) })
+                                                        StreamingPlaylistCard(item = playlist, isSelected = selectedStreamingIds.contains(playlist.id), selectionMode = isSelectionMode, onClick = { if (isSelectionMode) viewModel.toggleStreamingSelection(playlist.id) else selectedPlaylistUrl = playlist.youtubeUrl }, onLongClick = { viewModel.toggleSelectionMode(true); viewModel.toggleStreamingSelection(playlist.id) })
                                                     }
                                                 }
                                             }
@@ -647,8 +650,9 @@ fun DiscoverScreen(
                             val playlistCover = selectedPlaylist?.thumbnailUrl
                                 ?: localPlaylistItems.firstOrNull { !it.thumbnailUrl.isNullOrEmpty() }?.thumbnailUrl
                             val totalDurationMs = remember(localPlaylistItems) { localPlaylistItems.sumOf { it.duration } }
-                            val isSyncing by viewModel.isSyncing.collectAsState()
-                            val canSync = selectedPlaylist != null && !(selectedPlaylist!!.youtubeUrl.contains("spotify.com") && localPlaylistItems.size > 100)
+                            val syncingPlaylists by viewModel.syncingPlaylists.collectAsState()
+                            val isSyncing = selectedPlaylist?.youtubeUrl in syncingPlaylists
+                            val canSync = !isArrangeModeEnabled && selectedPlaylist != null && !(selectedPlaylist!!.youtubeUrl.contains("spotify.com") && localPlaylistItems.size > 100)
                             
                             ImmersivePlaylistHeader(
                                 title = if (isArrangeModeEnabled) "Arrange Songs" else (selectedPlaylist?.title ?: "Playlist"),

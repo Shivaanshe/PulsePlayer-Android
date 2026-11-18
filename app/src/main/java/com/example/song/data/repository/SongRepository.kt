@@ -275,27 +275,38 @@ class SongRepository(
         }
     }
 
-    suspend fun syncPlaylist(playlist: StreamingItem): Boolean = withContext(Dispatchers.IO) {
-        if (!playlist.isPlaylist) return@withContext false
+    suspend fun syncPlaylist(playlist: StreamingItem): Int = withContext(Dispatchers.IO) {
+        if (!playlist.isPlaylist) return@withContext 0
         
         val freshTracks = if (playlist.youtubeUrl.contains("spotify.com")) {
+            android.util.Log.d("SongRepository", "Syncing Spotify Playlist: ${playlist.youtubeUrl}")
             val resolved = com.example.song.util.SpotifyResolver.resolve(playlist.youtubeUrl, this@SongRepository)
-            if (resolved.size <= 1) return@withContext false // Escape single-track collection
+            if (resolved.none { it.isPlaylist }) {
+                android.util.Log.e("SongRepository", "SpotifyResolver failed to return a valid playlist header.")
+                throw IllegalStateException("Couldn't read the playlist")
+            }
             resolved.filter { !it.isPlaylist }
         } else {
+            android.util.Log.d("SongRepository", "Syncing YouTube Playlist: ${playlist.youtubeUrl}")
             val resolved = com.example.song.util.YoutubeStreamHandler.getMetadata(playlist.youtubeUrl)
+            if (resolved.none { it.isPlaylist }) {
+                android.util.Log.e("SongRepository", "YoutubeStreamHandler failed to return a valid playlist header.")
+                throw IllegalStateException("Couldn't read the playlist")
+            }
             resolved.filter { !it.isPlaylist }
         }
         
-        val existingTracks = streamingDao.getItemsForPlaylistSync(playlist.youtubeUrl)
-        val tombstonedUrls = streamingDao.getTombstonesForPlaylist(playlist.youtubeUrl).toSet()
+        android.util.Log.d("SongRepository", "Fresh tracks found: ${freshTracks.size}")
         
-        val existingCoreTitles = existingTracks.map { it.title.toCoreTitle() }.toSet()
-        val existingVideoIds = existingTracks.map { it.youtubeUrl.extractYoutubeVideoId() }.toSet()
+        val existingTracks = streamingDao.getItemsForPlaylistSync(playlist.youtubeUrl)
+        val tombstones = streamingDao.getTombstonesForPlaylist(playlist.youtubeUrl)
+        
+        val existingCoreTitles = existingTracks.map { it.title.toCoreTitle() }.toMutableSet()
+        val existingVideoIds = existingTracks.map { it.youtubeUrl.extractYoutubeVideoId() }.toMutableSet()
         
         val maxExistingPosition = existingTracks.maxOfOrNull { it.position } ?: -1
-        
         var nextPosition = maxExistingPosition + 1
+        
         val tracksToInsert = mutableListOf<StreamingItem>()
         
         freshTracks.forEach { newTrack ->
@@ -303,9 +314,13 @@ class SongRepository(
             val trackCoreTitle = newTrack.title.toCoreTitle()
             
             val isDuplicate = existingVideoIds.contains(trackVideoId) || existingCoreTitles.contains(trackCoreTitle)
-            val isTombstoned = tombstonedUrls.contains(newTrack.youtubeUrl) || tombstonedUrls.contains(trackVideoId)
+            val isTombstoned = tombstones.any { 
+                it.trackUrl == newTrack.youtubeUrl || it.videoId == trackVideoId || it.coreTitle == trackCoreTitle
+            }
             
             if (!isDuplicate && !isTombstoned) {
+                existingVideoIds.add(trackVideoId)
+                existingCoreTitles.add(trackCoreTitle)
                 tracksToInsert.add(
                     newTrack.copy(
                         id = 0,
@@ -316,17 +331,20 @@ class SongRepository(
             }
         }
         
-        if (tracksToInsert.isNotEmpty()) {
-            streamingDao.insertItems(tracksToInsert)
-        }
+        android.util.Log.d("SongRepository", "Tracks to insert: ${tracksToInsert.size}")
         
         val now = System.currentTimeMillis()
-        streamingDao.updateLastSyncedAt(playlist.id, now)
-        return@withContext true
+        streamingDao.insertTracksAndUpdateSyncTime(tracksToInsert, playlist.id, now)
+        return@withContext tracksToInsert.size
     }
 
     suspend fun insertStreamingItems(items: List<StreamingItem>) {
         streamingDao.insertItems(items)
+        items.forEach { item ->
+            if (item.parentPlaylistUrl != null) {
+                streamingDao.removeTombstone(item.parentPlaylistUrl, item.youtubeUrl)
+            }
+        }
     }
 
     suspend fun updateStreamingItems(items: List<StreamingItem>) {
@@ -340,13 +358,16 @@ class SongRepository(
                 deleteLocalFileForStreamingItem(pItem)
             }
             streamingDao.deletePlaylistItems(item.youtubeUrl)
+            streamingDao.deleteTombstonesForPlaylist(item.youtubeUrl)
         } else {
             deleteLocalFileForStreamingItem(item)
             if (item.parentPlaylistUrl != null) {
                 streamingDao.insertSyncTombstone(
                     com.example.song.data.model.SyncTombstone(
                         playlistUrl = item.parentPlaylistUrl,
-                        trackUrl = item.youtubeUrl
+                        trackUrl = item.youtubeUrl,
+                        coreTitle = item.title.toCoreTitle(),
+                        videoId = item.youtubeUrl.extractYoutubeVideoId()
                     )
                 )
             }

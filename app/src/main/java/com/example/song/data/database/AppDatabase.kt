@@ -109,6 +109,8 @@ abstract class AppDatabase : RoomDatabase() {
                     CREATE TABLE IF NOT EXISTS `sync_tombstones` (
                         `playlistUrl` TEXT NOT NULL,
                         `trackUrl` TEXT NOT NULL,
+                        `coreTitle` TEXT NOT NULL,
+                        `videoId` TEXT NOT NULL,
                         PRIMARY KEY(`playlistUrl`, `trackUrl`)
                     )
                     """.trimIndent()

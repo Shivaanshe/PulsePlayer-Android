@@ -363,7 +363,20 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
-                // Attempt lightweight resolution first for ALL playlists
+                val expCount = preflight.expectedCount
+
+                if (expCount != null && expCount > 100) {
+                    // Crawler ONLY wakes up for Spotify playlists with > 100 songs
+                    repository.spotifyCrawlPipeline.prepareCrawl(
+                        playlistId = preflight.playlistId,
+                        initialExpectedCount = expCount,
+                        title = preflight.title
+                    )
+                    _activeSpotifyCrawlUrl.value = preflight.cleanUrl
+                    return@launch
+                }
+
+                // Attempt lightweight resolution first for ALL playlists <= 100
                 _extractionStatus.value = "Resolving Spotify tracks..."
                 val resolvedItems = try {
                     SpotifyResolver.resolve(preflight.cleanUrl, repository)
@@ -371,22 +384,17 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     emptyList()
                 }
 
-                val expCount = preflight.expectedCount
                 val trackCount = resolvedItems.count { !it.isPlaylist }
 
                 // Check if lightweight parser fetched the full playlist (<= 100 songs or count <= 100)
-                val isSmallPlaylist = when {
-                    expCount != null -> expCount <= 100
-                    resolvedItems.isNotEmpty() && trackCount < 100 -> true
-                    else -> false
-                }
+                val isSmallPlaylist = expCount != null || (resolvedItems.isNotEmpty() && trackCount < 100)
 
                 if (isSmallPlaylist && resolvedItems.isNotEmpty()) {
                     _pendingStreamingItems.value = resolvedItems
                     return@launch
                 }
 
-                // Crawler ONLY wakes up for Spotify playlists with > 100 songs
+                // Crawler fallback if lightweight didn't fetch all for some reason and > 100 wasn't known
                 repository.spotifyCrawlPipeline.prepareCrawl(
                     playlistId = preflight.playlistId,
                     initialExpectedCount = expCount,
@@ -444,18 +452,40 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private val _isSyncing = MutableStateFlow(false)
-    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+    private val _syncingPlaylists = MutableStateFlow<Set<String>>(emptySet())
+    val syncingPlaylists: StateFlow<Set<String>> = _syncingPlaylists.asStateFlow()
 
     fun syncCollection(playlist: StreamingItem) {
+        val url = playlist.youtubeUrl
+        if (_syncingPlaylists.value.contains(url)) return
+        
+        val currentSet = _syncingPlaylists.value.toMutableSet()
+        currentSet.add(url)
+        _syncingPlaylists.value = currentSet
+        
         viewModelScope.launch {
-            _isSyncing.value = true
             try {
-                repository.syncPlaylist(playlist)
+                if (!isConnectedToInternet()) {
+                    _uiEvent.emit("Cannot sync playlist while offline.")
+                    return@launch
+                }
+                
+                val addedCount = repository.syncPlaylist(playlist)
+                if (addedCount > 0) {
+                    _uiEvent.emit("Added $addedCount new track(s) to playlist.")
+                } else {
+                    _uiEvent.emit("Playlist is already up to date.")
+                }
+            } catch (e: java.io.IOException) {
+                Log.e("SongViewModel", "Network error syncing playlist", e)
+                _uiEvent.emit("Network error syncing playlist. Please try again.")
             } catch (e: Exception) {
                 Log.e("SongViewModel", "Error syncing playlist", e)
+                _uiEvent.emit("An error occurred while syncing playlist.")
             } finally {
-                _isSyncing.value = false
+                val newSet = _syncingPlaylists.value.toMutableSet()
+                newSet.remove(url)
+                _syncingPlaylists.value = newSet
             }
         }
     }

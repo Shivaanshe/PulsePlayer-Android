@@ -75,9 +75,23 @@ interface StreamingDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSyncTombstone(tombstone: com.example.song.data.model.SyncTombstone)
 
-    @Query("SELECT trackUrl FROM sync_tombstones WHERE playlistUrl = :playlistUrl")
-    suspend fun getTombstonesForPlaylist(playlistUrl: String): List<String>
+    @Query("SELECT * FROM sync_tombstones WHERE playlistUrl = :playlistUrl")
+    suspend fun getTombstonesForPlaylist(playlistUrl: String): List<com.example.song.data.model.SyncTombstone>
+
+    @Query("DELETE FROM sync_tombstones WHERE playlistUrl = :playlistUrl")
+    suspend fun deleteTombstonesForPlaylist(playlistUrl: String)
+
+    @Query("DELETE FROM sync_tombstones WHERE playlistUrl = :playlistUrl AND trackUrl = :trackUrl")
+    suspend fun removeTombstone(playlistUrl: String, trackUrl: String)
 
     @Query("UPDATE streaming_items SET lastSyncedAt = :timestamp WHERE id = :itemId")
     suspend fun updateLastSyncedAt(itemId: Int, timestamp: Long)
+
+    @Transaction
+    suspend fun insertTracksAndUpdateSyncTime(tracks: List<StreamingItem>, playlistId: Int, syncTime: Long) {
+        if (tracks.isNotEmpty()) {
+            insertItems(tracks)
+        }
+        updateLastSyncedAt(playlistId, syncTime)
+    }
 }

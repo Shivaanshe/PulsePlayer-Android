@@ -124,14 +124,14 @@ object SpotifyResolver {
                                 if (trackTitle.isNotEmpty()) {
                                     var trackThumb = extractSpotifyImage(trackJson)
                                     if (trackThumb == null || trackThumb.contains("spotifycdn.com/embed")) {
-                                        trackThumb = repository.fetchArtwork(trackTitle, trackArtist)
+                                        trackThumb = collectionThumb
                                     }
 
                                     tracks.add(StreamingItem(
                                         youtubeUrl = "ytsearch1:$trackTitle $trackArtist",
                                         title = trackTitle,
                                         artist = trackArtist,
-                                        thumbnailUrl = trackThumb ?: collectionThumb,
+                                        thumbnailUrl = trackThumb,
                                         isPlaylist = false,
                                         parentPlaylistUrl = if (trackList.length() > 1) url else null,
                                         duration = trackJson.optLong("duration", 0L)
@@ -165,14 +165,14 @@ object SpotifyResolver {
                             if (trackTitle.isNotEmpty()) {
                                 var trackThumb = extractSpotifyImage(entity)
                                 if (trackThumb == null || (trackThumb.contains("spotifycdn.com/embed"))) {
-                                    trackThumb = repository.fetchArtwork(trackTitle, trackArtist)
+                                    trackThumb = collectionThumb
                                 }
 
                                 tracks.add(StreamingItem(
                                     youtubeUrl = "ytsearch1:$trackTitle $trackArtist",
                                     title = trackTitle,
                                     artist = trackArtist,
-                                    thumbnailUrl = trackThumb ?: collectionThumb,
+                                    thumbnailUrl = trackThumb,
                                     isPlaylist = false,
                                     parentPlaylistUrl = null,
                                     duration = entity.optLong("duration", 0L)

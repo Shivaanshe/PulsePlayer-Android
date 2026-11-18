@@ -194,8 +194,8 @@ fun ImmersivePlaylistHeader(
         
         if (onSyncClick != null) {
             Spacer(modifier = Modifier.height(6.dp))
+            val format = remember { java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault()) }
             val syncText = if (lastSyncedAt != null) {
-                val format = java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault())
                 "Last synced: ${format.format(java.util.Date(lastSyncedAt))}"
             } else {
                 "Not synced yet"
