@@ -363,6 +363,15 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     return@launch
                 }
 
+                if (preflight.route == com.example.song.data.crawler.SpotifyCrawlPipeline.PreflightRoute.LIGHTWEIGHT_PARSER) {
+                    _extractionStatus.value = "Resolving Spotify tracks..."
+                    val items = SpotifyResolver.resolve(preflight.cleanUrl, repository)
+                    if (items.isNotEmpty()) {
+                        _pendingStreamingItems.value = items
+                        return@launch
+                    }
+                }
+
                 repository.spotifyCrawlPipeline.prepareCrawl(
                     playlistId = preflight.playlistId,
                     initialExpectedCount = preflight.expectedCount,
@@ -410,43 +419,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 val items = repository.convertSpotifyCrawlToStreamingItems(playlistId)
                 if (items.isEmpty()) return@launch
 
-                val playlistHeader = items.find { it.isPlaylist }
-                if (playlistHeader != null) {
-                    val cleanUrl = com.example.song.util.SpotifyResolver.sanitizeUrl(playlistHeader.youtubeUrl)
-                    val sanitizedHeader = playlistHeader.copy(youtubeUrl = cleanUrl)
-                    val sanitizedItems = items.map { item ->
-                        if (item.isPlaylist) sanitizedHeader
-                        else item.copy(parentPlaylistUrl = cleanUrl)
-                    }
-
-                    val existingPlaylist = repository.getPlaylistByUrl(cleanUrl)
-                    if (existingPlaylist != null) {
-                        val existingTracks = repository.getItemsForPlaylistSync(cleanUrl)
-                        val newTracks = sanitizedItems.filter { !it.isPlaylist }
-                        val existingUrls = existingTracks.map { it.youtubeUrl }.toSet()
-                        val newUrls = newTracks.map { it.youtubeUrl }.toSet()
-
-                        _activeSpotifyCrawlUrl.value = null
-
-                        if (existingTracks.size == newTracks.size && existingUrls == newUrls) {
-                            _duplicatePlaylistState.value = DuplicatePlaylistState.AlreadyExists(existingPlaylist.title)
-                        } else {
-                            _duplicatePlaylistState.value = DuplicatePlaylistState.UpdateAvailable(
-                                existingPlaylist = existingPlaylist,
-                                newHeader = sanitizedHeader,
-                                newTracks = newTracks,
-                                existingCount = existingTracks.size,
-                                newCount = newTracks.size
-                            )
-                        }
-                        return@launch
-                    } else {
-                        repository.insertStreamingItems(sanitizedItems)
-                        PulseLogger.log("Imported ${sanitizedItems.size - 1} tracks from Spotify playlist.")
-                    }
-                } else {
-                    repository.insertStreamingItems(items)
-                }
+                _activeSpotifyCrawlUrl.value = null
+                _pendingStreamingItems.value = items
             } catch (e: Exception) {
                 Log.e("SongViewModel", "Error importing captured Spotify playlist", e)
             } finally {
