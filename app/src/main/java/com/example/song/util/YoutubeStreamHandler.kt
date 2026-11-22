@@ -303,8 +303,16 @@ object YoutubeStreamHandler {
                                 headers["User-Agent"] = "com.google.android.youtube/19.29.37 (Linux; U; Android 14; en_US; Pixel 8 Build/AP2A.240705.004) gzip"
                             }
                             
+                            var thumb = json.optString("thumbnail")
+                            if (thumb.isEmpty()) {
+                                val thumbnails = json.optJSONArray("thumbnails")
+                                if (thumbnails != null && thumbnails.length() > 0) {
+                                    thumb = thumbnails.getJSONObject(thumbnails.length() - 1).optString("url")
+                                }
+                            }
+                            
                             if (directUrl.isNotEmpty()) {
-                                return@withContext StreamInfo(url = directUrl, headers = headers, videoId = json.optString("id"))
+                                return@withContext StreamInfo(url = directUrl, headers = headers, videoId = json.optString("id"), thumbnailUrl = thumb.ifEmpty { null })
                             }
                         }
                     } catch (e: CancellationException) {

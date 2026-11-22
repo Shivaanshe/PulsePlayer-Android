@@ -339,9 +339,18 @@ class SongRepository(
         val now = System.currentTimeMillis()
         streamingDao.insertTracksAndUpdateSyncTime(tracksToInsert, playlist.id, now)
         
-        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-            backfillMissingArtwork(playlist.youtubeUrl, playlist.thumbnailUrl)
-        }
+        val request = androidx.work.OneTimeWorkRequestBuilder<com.example.song.worker.ArtworkBackfillWorker>()
+            .setInputData(androidx.work.workDataOf(
+                "playlistUrl" to playlist.youtubeUrl,
+                "placeholderThumb" to playlist.thumbnailUrl
+            ))
+            .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
+            .build()
+        androidx.work.WorkManager.getInstance(com.example.song.SongApplication.getInstance()).enqueueUniqueWork(
+            "artwork_backfill_${playlist.youtubeUrl}",
+            androidx.work.ExistingWorkPolicy.KEEP,
+            request
+        )
         
         return@withContext tracksToInsert.size
     }
@@ -356,13 +365,22 @@ class SongRepository(
         
         val playlistHeader = items.firstOrNull { it.isPlaylist }
         if (playlistHeader != null && playlistHeader.youtubeUrl.contains("spotify.com")) {
-            CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
-                backfillMissingArtwork(playlistHeader.youtubeUrl, playlistHeader.thumbnailUrl)
-            }
+            val request = androidx.work.OneTimeWorkRequestBuilder<com.example.song.worker.ArtworkBackfillWorker>()
+                .setInputData(androidx.work.workDataOf(
+                    "playlistUrl" to playlistHeader.youtubeUrl,
+                    "placeholderThumb" to playlistHeader.thumbnailUrl
+                ))
+                .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
+                .build()
+            androidx.work.WorkManager.getInstance(com.example.song.SongApplication.getInstance()).enqueueUniqueWork(
+                "artwork_backfill_${playlistHeader.youtubeUrl}",
+                androidx.work.ExistingWorkPolicy.KEEP,
+                request
+            )
         }
     }
     
-    private suspend fun backfillMissingArtwork(playlistUrl: String, placeholderThumb: String?) {
+    suspend fun backfillMissingArtwork(playlistUrl: String, placeholderThumb: String?) {
         val tracks = streamingDao.getItemsForPlaylistSync(playlistUrl)
         val tracksToBackfill = tracks.filter { it.thumbnailUrl.isNullOrEmpty() || it.thumbnailUrl == placeholderThumb }
         
@@ -397,7 +415,7 @@ class SongRepository(
                                 } else {
                                     missCount.incrementAndGet()
                                 }
-                                kotlinx.coroutines.delay(300)
+                                kotlinx.coroutines.delay(450)
                             } catch (e: Exception) {
                                 if (e is CancellationException) throw e
                                 errorCount.incrementAndGet()
@@ -601,11 +619,28 @@ class SongRepository(
         streamingDao.getItemsByIdsSync(ids)
     }
 
+    private suspend fun searchITunesWithRetry(query: String): com.example.song.data.api.ITunesResponse {
+        var attempt = 1
+        while (true) {
+            try {
+                return iTunesService.searchSong(query)
+            } catch (e: retrofit2.HttpException) {
+                if (attempt < 2 && (e.code() == 403 || e.code() == 429)) {
+                    android.util.Log.w("ArtworkBackfill", "[RATE-LIMIT] HTTP ${e.code()} for \"$query\" - retrying in 1500ms")
+                    kotlinx.coroutines.delay(1500)
+                    attempt++
+                } else {
+                    throw e
+                }
+            }
+        }
+    }
+
     suspend fun fetchArtwork(title: String, artist: String): String? = withContext(Dispatchers.IO) {
         val query = "$title $artist"
         try {
             android.util.Log.d("ArtworkBackfill", "[SEARCH-RAW] query=\"$query\"")
-            var response = iTunesService.searchSong(query)
+            var response = searchITunesWithRetry(query)
             
             if (response.results.isEmpty()) {
                 android.util.Log.d("ArtworkBackfill", "[MISS-RAW] \"$query\" (0 results)")
@@ -615,7 +650,7 @@ class SongRepository(
                 if (cleanTitle != title || cleanArtist != artist) {
                     val cleanQuery = "$cleanTitle $cleanArtist"
                     android.util.Log.d("ArtworkBackfill", "[SEARCH-CLEAN] query=\"$cleanQuery\"")
-                    response = iTunesService.searchSong(cleanQuery)
+                    response = searchITunesWithRetry(cleanQuery)
                     
                     if (response.results.isEmpty()) {
                         android.util.Log.d("ArtworkBackfill", "[MISS-CLEAN] \"$cleanQuery\" (0 results)")
@@ -636,6 +671,22 @@ class SongRepository(
             android.util.Log.e("ArtworkBackfill", "[ERROR] query=\"$query\" | ${e.javaClass.simpleName}: ${e.message}")
             null
         }
+    }
+
+    suspend fun updateStreamingItemThumbnailIfPlaceholder(streamingItemId: Int, newThumbUrl: String): Boolean = withContext(Dispatchers.IO) {
+        val item = streamingDao.getItemById(streamingItemId) ?: return@withContext false
+        if (item.thumbnailUrl.isNullOrEmpty()) {
+            streamingDao.updateThumbnail(streamingItemId, newThumbUrl)
+            return@withContext true
+        }
+        if (item.parentPlaylistUrl != null) {
+            val playlist = streamingDao.getPlaylistByUrl(item.parentPlaylistUrl)
+            if (playlist != null && item.thumbnailUrl == playlist.thumbnailUrl) {
+                streamingDao.updateThumbnail(streamingItemId, newThumbUrl)
+                return@withContext true
+            }
+        }
+        return@withContext false
     }
 
     suspend fun resolveSpotifyMetadata(url: String) = withContext(Dispatchers.IO) {

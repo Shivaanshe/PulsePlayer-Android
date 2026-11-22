@@ -195,7 +195,7 @@ class MusicService : MediaSessionService() {
                         
                         return try {
                             runBlocking(Dispatchers.IO) { 
-                                val resolved = performResolution(query, artworkUrl, isPriority = true)
+                                val resolved = performResolution(query, artworkUrl, mediaId, isPriority = true)
                                 if (resolved != null) {
                                     resolvedCache[query] = resolved
                                     withContext(Dispatchers.Main) {
@@ -481,7 +481,8 @@ class MusicService : MediaSessionService() {
             try {
                 PulseLogger.log("Auto-recovery: Re-resolving stream for $query")
                 val artworkUrl = mediaItem.mediaMetadata.extras?.getString("custom_artwork_url") ?: ""
-                val freshData = performResolution(query, artworkUrl, isPriority = true)
+                val mediaId = mediaItem.mediaId
+                val freshData = performResolution(query, artworkUrl, mediaId, isPriority = true)
 
                 if (freshData != null) {
                     resolvedCache[query] = freshData
@@ -509,7 +510,7 @@ class MusicService : MediaSessionService() {
         }
     }
 
-    private suspend fun performResolution(query: String, artworkUrl: String, isPriority: Boolean): ResolvedData? = withContext(Dispatchers.IO) {
+    private suspend fun performResolution(query: String, artworkUrl: String, mediaId: String?, isPriority: Boolean): ResolvedData? = withContext(Dispatchers.IO) {
         if (query.isBlank()) {
             PulseLogger.log("Aborting JIT resolution: query is blank", isError = true)
             return@withContext null
@@ -548,6 +549,17 @@ class MusicService : MediaSessionService() {
                 val art = artworkDeferred.await()
                 
                 if (info != null) {
+                    if (info.thumbnailUrl != null) {
+                        val parsedMediaId = mediaId?.toIntOrNull()
+                        if (parsedMediaId != null && parsedMediaId >= 1_000_000) {
+                            val streamingItemId = parsedMediaId - 1_000_000
+                            val updated = SongApplication.getInstance().repository.updateStreamingItemThumbnailIfPlaceholder(streamingItemId, info.thumbnailUrl)
+                            if (updated) {
+                                val freshArt = fetchImageAsByteArray(info.thumbnailUrl)
+                                return@withLock ResolvedData(info.url, info.headers, freshArt)
+                            }
+                        }
+                    }
                     ResolvedData(info.url, info.headers, art)
                 } else {
                     null
@@ -597,7 +609,7 @@ class MusicService : MediaSessionService() {
                 if (query != null && (!resolvedCache.containsKey(query) || resolvedCache[query]?.isExpired() == true)) {
                     try {
                         delay((1500L..3500L).random())
-                        val resolved = performResolution(query, artUrl ?: "", isPriority = false)
+                        val resolved = performResolution(query, artUrl ?: "", item.mediaId, isPriority = false)
                         if (resolved != null && isActive) {
                             resolvedCache[query] = resolved
                             withContext(Dispatchers.Main) {
