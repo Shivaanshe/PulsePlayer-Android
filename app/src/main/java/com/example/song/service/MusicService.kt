@@ -539,31 +539,32 @@ class MusicService : MediaSessionService() {
         activeJobs[query] = job
         
         try {
-            YoutubeStreamHandler.ytDlMutex.withLock {
-                if (!isPriority && !job.isActive) return@withLock null
+            val (info, art) = YoutubeStreamHandler.ytDlMutex.withLock {
+                if (!isPriority && !job.isActive) return@withLock Pair(null, null)
                 
                 val streamDeferred = async { YoutubeStreamHandler.getStreamInfo(query, processId) }
                 val artworkDeferred = async { fetchImageAsByteArray(artworkUrl) }
                 
-                val info = withTimeoutOrNull(35000L) { streamDeferred.await() }
-                val art = artworkDeferred.await()
-                
-                if (info != null) {
-                    if (info.thumbnailUrl != null) {
-                        val parsedMediaId = mediaId?.toIntOrNull()
-                        if (parsedMediaId != null && parsedMediaId >= 1_000_000) {
-                            val streamingItemId = parsedMediaId - 1_000_000
-                            val updated = SongApplication.getInstance().repository.updateStreamingItemThumbnailIfPlaceholder(streamingItemId, info.thumbnailUrl)
-                            if (updated) {
-                                val freshArt = fetchImageAsByteArray(info.thumbnailUrl)
-                                return@withLock ResolvedData(info.url, info.headers, freshArt)
-                            }
+                val i = withTimeoutOrNull(35000L) { streamDeferred.await() }
+                val a = artworkDeferred.await()
+                Pair(i, a)
+            }
+            
+            if (info != null) {
+                if (info.thumbnailUrl != null) {
+                    val parsedMediaId = mediaId?.toIntOrNull()
+                    if (parsedMediaId != null && parsedMediaId >= 1_000_000) {
+                        val streamingItemId = parsedMediaId - 1_000_000
+                        val updated = SongApplication.getInstance().repository.updateStreamingItemThumbnailIfPlaceholder(streamingItemId, info.thumbnailUrl)
+                        if (updated) {
+                            val freshArt = fetchImageAsByteArray(info.thumbnailUrl)
+                            return@withContext ResolvedData(info.url, info.headers, freshArt)
                         }
                     }
-                    ResolvedData(info.url, info.headers, art)
-                } else {
-                    null
                 }
+                return@withContext ResolvedData(info.url, info.headers, art)
+            } else {
+                return@withContext null
             }
         } catch (e: CancellationException) {
             throw e

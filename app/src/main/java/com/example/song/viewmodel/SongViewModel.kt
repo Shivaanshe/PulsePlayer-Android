@@ -62,7 +62,6 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.io.IOException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -1092,17 +1091,13 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
                             mediaItem?.let { item ->
                                 val songId = item.mediaId.toIntOrNull()
-                                val repositoryArtwork = if (songId != null && songId >= 1_000_000) {
-                                    val dbItem = runBlocking { repository.getStreamingItemsByIdsSync(listOf(songId - 1_000_000)).firstOrNull() }
-                                    dbItem?.thumbnailUrl
-                                } else null
                                 
                                 val song = _allSongs.value.find { it.id == songId } ?: Song(
                                     id = songId ?: 0,
                                     title = item.mediaMetadata.title?.toString() ?: "Unknown",
                                     artist = item.mediaMetadata.artist?.toString() ?: "Unknown",
                                     audioUri = item.mediaMetadata.extras?.getString("youtube_url") ?: "",
-                                    imageUrl = repositoryArtwork ?: item.mediaMetadata.extras?.getString("custom_artwork_url")
+                                    imageUrl = item.mediaMetadata.extras?.getString("custom_artwork_url")
                                 )
                                 
                                 // 1. PRUNE FIRST (while _currentPlayingSong still holds the OLD song)
@@ -1114,6 +1109,20 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                                 _currentPlayingSong.value = song
                                 _duration.value = controller.duration.coerceAtLeast(0L)
                                 PulseLogger.log("Track transition: ${song.title}")
+
+                                // 3. FETCH LATEST THUMBNAIL FROM ROOM
+                                if (songId != null && songId >= 1_000_000) {
+                                    viewModelScope.launch {
+                                        val dbItem = repository.getStreamingItemsByIdsSync(listOf(songId - 1_000_000)).firstOrNull()
+                                        val latestThumb = dbItem?.thumbnailUrl
+                                        if (latestThumb != null) {
+                                            val current = _currentPlayingSong.value
+                                            if (current?.id == songId && current.imageUrl != latestThumb) {
+                                                _currentPlayingSong.value = current.copy(imageUrl = latestThumb)
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
 

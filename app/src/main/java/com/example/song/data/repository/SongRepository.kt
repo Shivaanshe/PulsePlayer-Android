@@ -410,25 +410,27 @@ class SongRepository(
         
         try {
             withContext(Dispatchers.IO) {
-                tracksToBackfill.forEach { track ->
-                    launch {
-                        semaphore.withPermit {
-                            try {
-                                val newThumb = fetchArtwork(track.title, track.artist ?: "Unknown Artist")
-                                if (!newThumb.isNullOrEmpty()) {
-                                    if (newThumb != track.thumbnailUrl) {
-                                        streamingDao.updateThumbnail(track.id, newThumb)
-                                        _artworkUpdates.tryEmit((1_000_000 + track.id) to newThumb)
+                kotlinx.coroutines.supervisorScope {
+                    tracksToBackfill.forEach { track ->
+                        launch {
+                            semaphore.withPermit {
+                                try {
+                                    val newThumb = fetchArtwork(track.title, track.artist ?: "Unknown Artist")
+                                    if (!newThumb.isNullOrEmpty()) {
+                                        if (newThumb != track.thumbnailUrl) {
+                                            streamingDao.updateThumbnail(track.id, newThumb)
+                                            _artworkUpdates.tryEmit((1_000_000 + track.id) to newThumb)
+                                        }
+                                        successCount.incrementAndGet()
+                                    } else {
+                                        missCount.incrementAndGet()
                                     }
-                                    successCount.incrementAndGet()
-                                } else {
-                                    missCount.incrementAndGet()
+                                    kotlinx.coroutines.delay(450)
+                                } catch (e: Exception) {
+                                    if (e is CancellationException) throw e
+                                    errorCount.incrementAndGet()
+                                    android.util.Log.e("ArtworkBackfill", "Failed to backfill artwork for ${track.title}", e)
                                 }
-                                kotlinx.coroutines.delay(450)
-                            } catch (e: Exception) {
-                                if (e is CancellationException) throw e
-                                errorCount.incrementAndGet()
-                                android.util.Log.e("ArtworkBackfill", "Failed to backfill artwork for ${track.title}", e)
                             }
                         }
                     }
