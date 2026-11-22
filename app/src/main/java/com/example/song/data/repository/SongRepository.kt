@@ -17,6 +17,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.withContext
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -62,6 +63,13 @@ class SongRepository(
     val spotifyCrawlDao: com.example.song.data.dao.SpotifyCrawlDao by lazy {
         AppDatabase.getDatabase(SongApplication.getInstance()).spotifyCrawlDao()
     }
+
+    private val _artworkUpdates = kotlinx.coroutines.flow.MutableSharedFlow<Pair<Int, String>>(
+        replay = 0, 
+        extraBufferCapacity = 16, 
+        onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+    )
+    val artworkUpdates: kotlinx.coroutines.flow.SharedFlow<Pair<Int, String>> = _artworkUpdates.asSharedFlow()
 
     val spotifyCrawlPipeline: com.example.song.data.crawler.SpotifyCrawlPipeline by lazy {
         com.example.song.data.crawler.SpotifyCrawlPipeline(
@@ -410,6 +418,7 @@ class SongRepository(
                                 if (!newThumb.isNullOrEmpty()) {
                                     if (newThumb != track.thumbnailUrl) {
                                         streamingDao.updateThumbnail(track.id, newThumb)
+                                        _artworkUpdates.tryEmit((1_000_000 + track.id) to newThumb)
                                     }
                                     successCount.incrementAndGet()
                                 } else {
@@ -675,18 +684,24 @@ class SongRepository(
 
     suspend fun updateStreamingItemThumbnailIfPlaceholder(streamingItemId: Int, newThumbUrl: String): Boolean = withContext(Dispatchers.IO) {
         val item = streamingDao.getItemById(streamingItemId) ?: return@withContext false
-        if (item.thumbnailUrl.isNullOrEmpty()) {
-            streamingDao.updateThumbnail(streamingItemId, newThumbUrl)
-            return@withContext true
+        
+        if (newThumbUrl.isBlank()) return@withContext false
+        if (item.thumbnailUrl == newThumbUrl) return@withContext false
+
+        val isPlaceholder = item.thumbnailUrl.isNullOrEmpty() || (item.parentPlaylistUrl != null && item.thumbnailUrl == streamingDao.getPlaylistByUrl(item.parentPlaylistUrl)?.thumbnailUrl)
+        
+        if (!isPlaceholder) {
+            android.util.Log.d("ArtworkBackfill", "[YTDLP-SKIP] \"${item.title}\" already has artwork, keeping existing cover")
+            return@withContext false
         }
-        if (item.parentPlaylistUrl != null) {
-            val playlist = streamingDao.getPlaylistByUrl(item.parentPlaylistUrl)
-            if (playlist != null && item.thumbnailUrl == playlist.thumbnailUrl) {
-                streamingDao.updateThumbnail(streamingItemId, newThumbUrl)
-                return@withContext true
-            }
-        }
-        return@withContext false
+        
+        streamingDao.updateThumbnail(streamingItemId, newThumbUrl)
+        val msg = "[YTDLP-FALLBACK] Updated missing cover for \"${item.title}\" (id=$streamingItemId) -> $newThumbUrl"
+        android.util.Log.d("ArtworkBackfill", msg)
+        com.example.song.util.PulseLogger.log(msg)
+        
+        _artworkUpdates.tryEmit((1_000_000 + streamingItemId) to newThumbUrl)
+        return@withContext true
     }
 
     suspend fun resolveSpotifyMetadata(url: String) = withContext(Dispatchers.IO) {

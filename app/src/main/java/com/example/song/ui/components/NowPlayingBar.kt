@@ -56,15 +56,20 @@ fun NowPlayingBar(
                 .padding(horizontal = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            AsyncImage(
-                model = song.imageUrl,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(48.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.LightGray),
-                contentScale = ContentScale.Crop
-            )
+            androidx.compose.animation.Crossfade(targetState = song.imageUrl, animationSpec = androidx.compose.animation.core.tween(450), label = "artwork_crossfade") { url ->
+                AsyncImage(
+                    model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                        .data(url)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.LightGray),
+                    contentScale = ContentScale.Crop
+                )
+            }
 
             Spacer(modifier = Modifier.width(12.dp))
 

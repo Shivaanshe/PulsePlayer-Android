@@ -83,17 +83,22 @@ fun CompactPlayerPane(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // Artwork
-                AsyncImage(
-                    model = song.imageUrl,
-                    contentDescription = null,
-                    modifier = Modifier
-                        .size(140.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .shadow(16.dp, RoundedCornerShape(24.dp))
-                        .background(Color.White.copy(alpha = 0.1f))
-                        .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp)),
-                    contentScale = ContentScale.Crop
-                )
+                androidx.compose.animation.Crossfade(targetState = song.imageUrl, animationSpec = androidx.compose.animation.core.tween(450), label = "artwork_crossfade") { url ->
+                    AsyncImage(
+                        model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                            .data(url)
+                            .crossfade(true)
+                            .build(),
+                        contentDescription = null,
+                        modifier = Modifier
+                            .size(140.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .shadow(16.dp, RoundedCornerShape(24.dp))
+                            .background(Color.White.copy(alpha = 0.1f))
+                            .border(1.dp, Color.White.copy(alpha = 0.2f), RoundedCornerShape(24.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 

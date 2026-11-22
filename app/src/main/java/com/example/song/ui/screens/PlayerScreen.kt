@@ -136,9 +136,12 @@ fun PlayerScreen(
                                 .background(Color.White.copy(alpha = 0.2f))
                                 .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(32.dp))
                         ) {
-                            Crossfade(targetState = song?.imageUrl, label = "AlbumArt") { url ->
+                            androidx.compose.animation.Crossfade(targetState = song?.imageUrl, animationSpec = androidx.compose.animation.core.tween(450), label = "artwork_crossfade") { url ->
                                 AsyncImage(
-                                    model = url,
+                                    model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                        .data(url)
+                                        .crossfade(true)
+                                        .build(),
                                     contentDescription = null,
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
@@ -201,9 +204,12 @@ fun PlayerScreen(
                                 .background(Color.White.copy(alpha = 0.2f))
                                 .border(1.5.dp, Color.White.copy(alpha = 0.3f), RoundedCornerShape(40.dp))
                         ) {
-                            Crossfade(targetState = song?.imageUrl, label = "AlbumArt") { url ->
+                            androidx.compose.animation.Crossfade(targetState = song?.imageUrl, animationSpec = androidx.compose.animation.core.tween(450), label = "artwork_crossfade") { url ->
                                 AsyncImage(
-                                    model = url,
+                                    model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                        .data(url)
+                                        .crossfade(true)
+                                        .build(),
                                     contentDescription = null,
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop

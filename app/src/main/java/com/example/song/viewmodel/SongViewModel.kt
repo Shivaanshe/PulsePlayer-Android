@@ -79,12 +79,7 @@ enum class QueueState {
 @OptIn(UnstableApi::class)
 class SongViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository: SongRepository = SongRepository(
-        AppDatabase.getDatabase(application).songDao(),
-        AppDatabase.getDatabase(application).playlistDao(),
-        AppDatabase.getDatabase(application).streamingDao(),
-        application.filesDir
-    )
+    private val repository: SongRepository = SongApplication.getInstance().repository
     private var mediaController: MediaController? = null
     private var isConnecting = false
     private var lastSentTimelineIds = listOf<Int>()
@@ -538,6 +533,44 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
     }.stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     init {
+        viewModelScope.launch {
+            repository.artworkUpdates.collect { (songId, newThumbUrl) ->
+                val current = _currentPlayingSong.value
+                if (current?.id == songId && current.imageUrl != newThumbUrl) {
+                    _currentPlayingSong.value = current.copy(imageUrl = newThumbUrl)
+                }
+                
+                
+                val manual = _manualQueue.value
+                val manIdx = manual.indexOfFirst { it.song.id == songId && it.song.imageUrl != newThumbUrl }
+                if (manIdx != -1) {
+                    val updated = manual.toMutableList()
+                    val oldItem = updated[manIdx]
+                    updated[manIdx] = oldItem.copy(song = oldItem.song.copy(imageUrl = newThumbUrl))
+                    _manualQueue.value = updated
+                }
+                
+                val parent = _parentQueue.value
+                val parIdx = parent.indexOfFirst { it.song.id == songId && it.song.imageUrl != newThumbUrl }
+                if (parIdx != -1) {
+                    val updated = parent.toMutableList()
+                    val oldItem = updated[parIdx]
+                    updated[parIdx] = oldItem.copy(song = oldItem.song.copy(imageUrl = newThumbUrl))
+                    _parentQueue.value = updated
+                }
+                
+                // _currentQueue is the source of truth for MusicService
+                val currentQueue = _currentQueue.value
+                val curIdx = currentQueue.indexOfFirst { it.id == songId && it.imageUrl != newThumbUrl }
+                if (curIdx != -1) {
+                    val updated = currentQueue.toMutableList()
+                    val oldItem = updated[curIdx]
+                    updated[curIdx] = oldItem.copy(imageUrl = newThumbUrl)
+                    _currentQueue.value = updated
+                    com.example.song.util.MusicQueueCache.setQueue(updated)
+                }
+            }
+        }
         viewModelScope.launch {
             repository.cleanUpDuplicateSingleSongs()
         }
