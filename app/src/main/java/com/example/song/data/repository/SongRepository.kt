@@ -366,27 +366,55 @@ class SongRepository(
         val tracks = streamingDao.getItemsForPlaylistSync(playlistUrl)
         val tracksToBackfill = tracks.filter { it.thumbnailUrl.isNullOrEmpty() || it.thumbnailUrl == placeholderThumb }
         
-        if (tracksToBackfill.isEmpty()) return
+        if (tracksToBackfill.isEmpty()) {
+            android.util.Log.d("ArtworkBackfill", "[SKIP] All tracks already have artwork")
+            return
+        }
         
-        android.util.Log.d("SongRepository", "Backfilling artwork for ${tracksToBackfill.size} tracks in background")
+        val startMsg = "[START] playlist=$playlistUrl | total=${tracks.size} | toBackfill=${tracksToBackfill.size}"
+        android.util.Log.d("ArtworkBackfill", startMsg)
+        com.example.song.util.PulseLogger.log(startMsg)
+        
+        val successCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val missCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val errorCount = java.util.concurrent.atomic.AtomicInteger(0)
+        val startTime = System.currentTimeMillis()
+        
         val semaphore = Semaphore(2)
         
-        withContext(Dispatchers.IO) {
-            tracksToBackfill.forEach { track ->
-                launch {
-                    semaphore.withPermit {
-                        try {
-                            val newThumb = fetchArtwork(track.title, track.artist ?: "Unknown Artist")
-                            if (!newThumb.isNullOrEmpty() && newThumb != track.thumbnailUrl) {
-                                streamingDao.updateThumbnail(track.id, newThumb)
+        try {
+            withContext(Dispatchers.IO) {
+                tracksToBackfill.forEach { track ->
+                    launch {
+                        semaphore.withPermit {
+                            try {
+                                val newThumb = fetchArtwork(track.title, track.artist ?: "Unknown Artist")
+                                if (!newThumb.isNullOrEmpty()) {
+                                    if (newThumb != track.thumbnailUrl) {
+                                        streamingDao.updateThumbnail(track.id, newThumb)
+                                    }
+                                    successCount.incrementAndGet()
+                                } else {
+                                    missCount.incrementAndGet()
+                                }
+                                kotlinx.coroutines.delay(300)
+                            } catch (e: Exception) {
+                                if (e is CancellationException) throw e
+                                errorCount.incrementAndGet()
+                                android.util.Log.e("ArtworkBackfill", "Failed to backfill artwork for ${track.title}", e)
                             }
-                            kotlinx.coroutines.delay(300)
-                        } catch (e: Exception) {
-                            android.util.Log.e("SongRepository", "Failed to backfill artwork for ${track.title}", e)
                         }
                     }
                 }
             }
+        } catch (e: CancellationException) {
+            android.util.Log.w("ArtworkBackfill", "[CANCELLED] Backfill job cancelled")
+            throw e
+        } finally {
+            val elapsed = System.currentTimeMillis() - startTime
+            val endMsg = "[END] Backfill finished in ${elapsed}ms | updated=${successCount.get()} | missed=${missCount.get()} | errors=${errorCount.get()}"
+            android.util.Log.d("ArtworkBackfill", endMsg)
+            com.example.song.util.PulseLogger.log(endMsg)
         }
     }
 
@@ -574,21 +602,38 @@ class SongRepository(
     }
 
     suspend fun fetchArtwork(title: String, artist: String): String? = withContext(Dispatchers.IO) {
+        val query = "$title $artist"
         try {
-            val query = "$title $artist"
+            android.util.Log.d("ArtworkBackfill", "[SEARCH-RAW] query=\"$query\"")
             var response = iTunesService.searchSong(query)
             
             if (response.results.isEmpty()) {
+                android.util.Log.d("ArtworkBackfill", "[MISS-RAW] \"$query\" (0 results)")
                 val cleanTitle = title.substringBefore(" (").substringBefore(" -").trim()
                 val cleanArtist = artist.substringBefore(",").trim()
+                
                 if (cleanTitle != title || cleanArtist != artist) {
                     val cleanQuery = "$cleanTitle $cleanArtist"
+                    android.util.Log.d("ArtworkBackfill", "[SEARCH-CLEAN] query=\"$cleanQuery\"")
                     response = iTunesService.searchSong(cleanQuery)
+                    
+                    if (response.results.isEmpty()) {
+                        android.util.Log.d("ArtworkBackfill", "[MISS-CLEAN] \"$cleanQuery\" (0 results)")
+                    } else {
+                        val artworkUrl = response.results.firstOrNull()?.artworkUrl100?.replace("100x100bb", "500x500bb")
+                        android.util.Log.d("ArtworkBackfill", "[HIT-CLEAN] \"$cleanQuery\" -> $artworkUrl")
+                        return@withContext artworkUrl
+                    }
                 }
+                return@withContext null
             }
             
-            response.results.firstOrNull()?.artworkUrl100?.replace("100x100bb", "500x500bb")
+            val artworkUrl = response.results.firstOrNull()?.artworkUrl100?.replace("100x100bb", "500x500bb")
+            android.util.Log.d("ArtworkBackfill", "[HIT-RAW] \"$query\" -> $artworkUrl")
+            return@withContext artworkUrl
         } catch (e: Exception) {
+            if (e is CancellationException) throw e
+            android.util.Log.e("ArtworkBackfill", "[ERROR] query=\"$query\" | ${e.javaClass.simpleName}: ${e.message}")
             null
         }
     }
