@@ -539,18 +539,16 @@ class MusicService : MediaSessionService() {
         activeJobs[query] = job
         
         try {
-            val (info, art) = YoutubeStreamHandler.ytDlMutex.withLock {
-                if (!isPriority && !job.isActive) return@withLock Pair(null, null)
-                
+            val artworkDeferred = async { fetchImageAsByteArray(artworkUrl) }
+            
+            val info = YoutubeStreamHandler.ytDlMutex.withLock {
+                if (!isPriority && !job.isActive) return@withLock null
                 val streamDeferred = async { YoutubeStreamHandler.getStreamInfo(query, processId) }
-                val artworkDeferred = async { fetchImageAsByteArray(artworkUrl) }
-                
-                val i = withTimeoutOrNull(35000L) { streamDeferred.await() }
-                val a = artworkDeferred.await()
-                Pair(i, a)
+                withTimeoutOrNull(35000L) { streamDeferred.await() }
             }
             
             if (info != null) {
+                val art = artworkDeferred.await()
                 if (info.thumbnailUrl != null) {
                     val parsedMediaId = mediaId?.toIntOrNull()
                     if (parsedMediaId != null && parsedMediaId >= 1_000_000) {
@@ -564,6 +562,7 @@ class MusicService : MediaSessionService() {
                 }
                 return@withContext ResolvedData(info.url, info.headers, art)
             } else {
+                artworkDeferred.cancel()
                 return@withContext null
             }
         } catch (e: CancellationException) {
