@@ -375,7 +375,7 @@ class SpotifyCrawlPipeline(
 
         // 3. Fallback generic number pattern from description
         if (count == null && desc.isNotEmpty()) {
-            val genericMatch = Pattern.compile("([0-9]+)\\s*(?:songs?|tracks?|items?|canciones|titres)?", Pattern.CASE_INSENSITIVE).matcher(desc)
+            val genericMatch = Pattern.compile("([0-9]+)\\s*(?:songs?|tracks?|items?|canciones|titres)", Pattern.CASE_INSENSITIVE).matcher(desc)
             if (genericMatch.find()) {
                 count = genericMatch.group(1)?.toIntOrNull()
             }

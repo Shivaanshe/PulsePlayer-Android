@@ -364,6 +364,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 }
 
                 val expCount = preflight.expectedCount
+                Log.d("SongViewModel", "Spotify preflight expected count: $expCount")
 
                 if (expCount != null && expCount > 100) {
                     // Crawler ONLY wakes up for Spotify playlists with > 100 songs
@@ -381,8 +382,10 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                 val resolvedItems = try {
                     SpotifyResolver.resolve(preflight.cleanUrl, repository)
                 } catch (e: Exception) {
+                    Log.e("SongViewModel", "SpotifyResolver crashed", e)
                     emptyList()
                 }
+                Log.d("SongViewModel", "SpotifyResolver returned ${resolvedItems.size} items")
 
                 val trackCount = resolvedItems.count { !it.isPlaylist }
 

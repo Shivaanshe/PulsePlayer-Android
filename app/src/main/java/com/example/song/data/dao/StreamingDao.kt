@@ -87,6 +87,9 @@ interface StreamingDao {
     @Query("UPDATE streaming_items SET lastSyncedAt = :timestamp WHERE id = :itemId")
     suspend fun updateLastSyncedAt(itemId: Int, timestamp: Long)
 
+    @Query("UPDATE streaming_items SET thumbnailUrl = :thumbnailUrl WHERE id = :itemId")
+    suspend fun updateThumbnail(itemId: Int, thumbnailUrl: String)
+
     @Transaction
     suspend fun insertTracksAndUpdateSyncTime(tracks: List<StreamingItem>, playlistId: Int, syncTime: Long) {
         if (tracks.isNotEmpty()) {

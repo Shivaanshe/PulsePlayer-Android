@@ -30,7 +30,10 @@ import androidx.core.content.edit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 
 class SongRepository(
     private val songDao: SongDao,
@@ -335,6 +338,11 @@ class SongRepository(
         
         val now = System.currentTimeMillis()
         streamingDao.insertTracksAndUpdateSyncTime(tracksToInsert, playlist.id, now)
+        
+        CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+            backfillMissingArtwork(playlist.youtubeUrl, playlist.thumbnailUrl)
+        }
+        
         return@withContext tracksToInsert.size
     }
 
@@ -343,6 +351,41 @@ class SongRepository(
         items.forEach { item ->
             if (item.parentPlaylistUrl != null) {
                 streamingDao.removeTombstone(item.parentPlaylistUrl, item.youtubeUrl)
+            }
+        }
+        
+        val playlistHeader = items.firstOrNull { it.isPlaylist }
+        if (playlistHeader != null && playlistHeader.youtubeUrl.contains("spotify.com")) {
+            CoroutineScope(Dispatchers.IO + SupervisorJob()).launch {
+                backfillMissingArtwork(playlistHeader.youtubeUrl, playlistHeader.thumbnailUrl)
+            }
+        }
+    }
+    
+    private suspend fun backfillMissingArtwork(playlistUrl: String, placeholderThumb: String?) {
+        val tracks = streamingDao.getItemsForPlaylistSync(playlistUrl)
+        val tracksToBackfill = tracks.filter { it.thumbnailUrl.isNullOrEmpty() || it.thumbnailUrl == placeholderThumb }
+        
+        if (tracksToBackfill.isEmpty()) return
+        
+        android.util.Log.d("SongRepository", "Backfilling artwork for ${tracksToBackfill.size} tracks in background")
+        val semaphore = Semaphore(2)
+        
+        withContext(Dispatchers.IO) {
+            tracksToBackfill.forEach { track ->
+                launch {
+                    semaphore.withPermit {
+                        try {
+                            val newThumb = fetchArtwork(track.title, track.artist ?: "Unknown Artist")
+                            if (!newThumb.isNullOrEmpty() && newThumb != track.thumbnailUrl) {
+                                streamingDao.updateThumbnail(track.id, newThumb)
+                            }
+                            kotlinx.coroutines.delay(300)
+                        } catch (e: Exception) {
+                            android.util.Log.e("SongRepository", "Failed to backfill artwork for ${track.title}", e)
+                        }
+                    }
+                }
             }
         }
     }
@@ -533,7 +576,17 @@ class SongRepository(
     suspend fun fetchArtwork(title: String, artist: String): String? = withContext(Dispatchers.IO) {
         try {
             val query = "$title $artist"
-            val response = iTunesService.searchSong(query)
+            var response = iTunesService.searchSong(query)
+            
+            if (response.results.isEmpty()) {
+                val cleanTitle = title.substringBefore(" (").substringBefore(" -").trim()
+                val cleanArtist = artist.substringBefore(",").trim()
+                if (cleanTitle != title || cleanArtist != artist) {
+                    val cleanQuery = "$cleanTitle $cleanArtist"
+                    response = iTunesService.searchSong(cleanQuery)
+                }
+            }
+            
             response.results.firstOrNull()?.artworkUrl100?.replace("100x100bb", "500x500bb")
         } catch (e: Exception) {
             null
