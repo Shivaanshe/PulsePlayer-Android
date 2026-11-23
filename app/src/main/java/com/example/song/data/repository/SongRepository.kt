@@ -314,6 +314,8 @@ class SongRepository(
         
         val existingCoreTitles = existingTracks.map { it.title.toCoreTitle() }.toMutableSet()
         val existingVideoIds = existingTracks.map { it.youtubeUrl.extractYoutubeVideoId() }.toMutableSet()
+        val existingTracksByFallbackKey = existingTracks.associateBy { "${it.title.trim().lowercase()}|${it.artist?.trim()?.lowercase()}" }
+        val existingTracksByUrl = existingTracks.associateBy { it.youtubeUrl }
         
         val maxExistingPosition = existingTracks.maxOfOrNull { it.position } ?: -1
         var nextPosition = maxExistingPosition + 1
@@ -332,11 +334,24 @@ class SongRepository(
             if (!isDuplicate && !isTombstoned) {
                 existingVideoIds.add(trackVideoId)
                 existingCoreTitles.add(trackCoreTitle)
+                
+                // Preserve existing artwork if it's already resolved
+                val fallbackKey = "${newTrack.title.trim().lowercase()}|${newTrack.artist?.trim()?.lowercase()}"
+                val matchedExisting = existingTracksByUrl[newTrack.youtubeUrl] ?: existingTracksByFallbackKey[fallbackKey]
+                
+                val finalThumb = if (matchedExisting != null && !matchedExisting.thumbnailUrl.isNullOrEmpty() && 
+                    matchedExisting.thumbnailUrl != playlist.thumbnailUrl) {
+                    matchedExisting.thumbnailUrl
+                } else {
+                    newTrack.thumbnailUrl
+                }
+                
                 tracksToInsert.add(
                     newTrack.copy(
                         id = 0,
                         parentPlaylistUrl = playlist.youtubeUrl,
-                        position = nextPosition++
+                        position = nextPosition++,
+                        thumbnailUrl = finalThumb
                     )
                 )
             }
@@ -347,18 +362,24 @@ class SongRepository(
         val now = System.currentTimeMillis()
         streamingDao.insertTracksAndUpdateSyncTime(tracksToInsert, playlist.id, now)
         
-        val request = androidx.work.OneTimeWorkRequestBuilder<com.example.song.worker.ArtworkBackfillWorker>()
-            .setInputData(androidx.work.workDataOf(
-                "playlistUrl" to playlist.youtubeUrl,
-                "placeholderThumb" to playlist.thumbnailUrl
-            ))
-            .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
-            .build()
-        androidx.work.WorkManager.getInstance(com.example.song.SongApplication.getInstance()).enqueueUniqueWork(
-            "artwork_backfill_${playlist.youtubeUrl}",
-            androidx.work.ExistingWorkPolicy.KEEP,
-            request
-        )
+        val stillNeedsArtwork = tracksToInsert.any { it.thumbnailUrl.isNullOrEmpty() || it.thumbnailUrl == playlist.thumbnailUrl }
+        
+        if (stillNeedsArtwork) {
+            val request = androidx.work.OneTimeWorkRequestBuilder<com.example.song.worker.ArtworkBackfillWorker>()
+                .setInputData(androidx.work.workDataOf(
+                    "playlistUrl" to playlist.youtubeUrl,
+                    "placeholderThumb" to playlist.thumbnailUrl
+                ))
+                .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
+                .build()
+            androidx.work.WorkManager.getInstance(com.example.song.SongApplication.getInstance()).enqueueUniqueWork(
+                "artwork_backfill_${playlist.youtubeUrl}",
+                androidx.work.ExistingWorkPolicy.KEEP,
+                request
+            )
+        } else {
+            android.util.Log.d("ArtworkBackfill", "[SKIP] Sync complete — all new tracks already have artwork")
+        }
         
         return@withContext tracksToInsert.size
     }
@@ -373,18 +394,26 @@ class SongRepository(
         
         val playlistHeader = items.firstOrNull { it.isPlaylist }
         if (playlistHeader != null && playlistHeader.youtubeUrl.contains("spotify.com")) {
-            val request = androidx.work.OneTimeWorkRequestBuilder<com.example.song.worker.ArtworkBackfillWorker>()
-                .setInputData(androidx.work.workDataOf(
-                    "playlistUrl" to playlistHeader.youtubeUrl,
-                    "placeholderThumb" to playlistHeader.thumbnailUrl
-                ))
-                .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
-                .build()
-            androidx.work.WorkManager.getInstance(com.example.song.SongApplication.getInstance()).enqueueUniqueWork(
-                "artwork_backfill_${playlistHeader.youtubeUrl}",
-                androidx.work.ExistingWorkPolicy.KEEP,
-                request
-            )
+            
+            // Check if there are actually any tracks that need artwork before enqueuing
+            val stillNeedsArtwork = items.any { !it.isPlaylist && (it.thumbnailUrl.isNullOrEmpty() || it.thumbnailUrl == playlistHeader.thumbnailUrl) }
+            
+            if (stillNeedsArtwork) {
+                val request = androidx.work.OneTimeWorkRequestBuilder<com.example.song.worker.ArtworkBackfillWorker>()
+                    .setInputData(androidx.work.workDataOf(
+                        "playlistUrl" to playlistHeader.youtubeUrl,
+                        "placeholderThumb" to playlistHeader.thumbnailUrl
+                    ))
+                    .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
+                    .build()
+                androidx.work.WorkManager.getInstance(com.example.song.SongApplication.getInstance()).enqueueUniqueWork(
+                    "artwork_backfill_${playlistHeader.youtubeUrl}",
+                    androidx.work.ExistingWorkPolicy.KEEP,
+                    request
+                )
+            } else {
+                android.util.Log.d("ArtworkBackfill", "[SKIP] Import complete — all tracks already have artwork")
+            }
         }
     }
     

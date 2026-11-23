@@ -168,7 +168,38 @@ fun DiscoverScreen(
                     CenterAlignedTopAppBar(colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
                         title = { Text(if (isArrangeModeEnabled) "Arrange Songs" else selectedPlaylist?.title ?: "Playlist", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis) },
                         navigationIcon = { if (!isArrangeModeEnabled) { IconButton(onClick = { selectedPlaylistUrl = null }, modifier = Modifier.padding(8.dp).background(Color.White.copy(alpha = 0.3f), CircleShape)) { Icon(imageVector = Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color(0xFF424242)) } } },
-                        actions = { if (isArrangeModeEnabled) { TextButton(onClick = { viewModel.toggleArrangeMode(false) }, modifier = Modifier.padding(end = 8.dp)) { Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63)) } } }
+                        actions = { 
+                            if (isArrangeModeEnabled) { 
+                                TextButton(onClick = { viewModel.toggleArrangeMode(false) }, modifier = Modifier.padding(end = 8.dp)) { Text("Done", fontWeight = FontWeight.Bold, color = Color(0xFFE91E63)) } 
+                            } else {
+                                val syncingPlaylists by viewModel.syncingPlaylists.collectAsState()
+                                val isSyncing = selectedPlaylist?.youtubeUrl in syncingPlaylists
+                                val playlistItems by viewModel.getItemsForStreamingPlaylist(selectedPlaylist!!.youtubeUrl).collectAsState(initial = emptyList())
+                                val canSync = selectedPlaylist != null && !(selectedPlaylist!!.youtubeUrl.contains("spotify.com") && playlistItems.size > 100)
+                                
+                                if (canSync) {
+                                    IconButton(
+                                        onClick = { selectedPlaylist?.let { viewModel.syncCollection(it) } },
+                                        enabled = !isSyncing,
+                                        modifier = Modifier.padding(end = 8.dp).background(Color.White.copy(alpha = 0.3f), CircleShape)
+                                    ) {
+                                        if (isSyncing) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(24.dp),
+                                                color = Color(0xFF424242),
+                                                strokeWidth = 2.dp
+                                            )
+                                        } else {
+                                            Icon(
+                                                imageVector = Icons.Default.Refresh,
+                                                contentDescription = "Sync Playlist",
+                                                tint = Color(0xFF424242)
+                                            )
+                                        }
+                                    }
+                                }
+                            } 
+                        }
                     )
                 } else {
                     CenterAlignedTopAppBar(colors = TopAppBarDefaults.centerAlignedTopAppBarColors(containerColor = Color.Transparent),
@@ -650,9 +681,23 @@ fun DiscoverScreen(
                             val playlistCover = selectedPlaylist?.thumbnailUrl
                                 ?: localPlaylistItems.firstOrNull { !it.thumbnailUrl.isNullOrEmpty() }?.thumbnailUrl
                             val totalDurationMs = remember(localPlaylistItems) { localPlaylistItems.sumOf { it.duration } }
-                            val syncingPlaylists by viewModel.syncingPlaylists.collectAsState()
-                            val isSyncing = selectedPlaylist?.youtubeUrl in syncingPlaylists
-                            val canSync = !isArrangeModeEnabled && selectedPlaylist != null && !(selectedPlaylist!!.youtubeUrl.contains("spotify.com") && localPlaylistItems.size > 100)
+                            
+                            val format = remember { java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault()) }
+                            val syncText = if (selectedPlaylist?.lastSyncedAt != null) {
+                                "Last synced: ${format.format(java.util.Date(selectedPlaylist!!.lastSyncedAt!!))}"
+                            } else {
+                                "Not synced yet"
+                            }
+                            
+                            Column(
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(
+                                    text = syncText,
+                                    style = MaterialTheme.typography.labelSmall.copy(color = Color.White.copy(alpha = 0.6f))
+                                )
+                            }
                             
                             ImmersivePlaylistHeader(
                                 title = if (isArrangeModeEnabled) "Arrange Songs" else (selectedPlaylist?.title ?: "Playlist"),
@@ -682,10 +727,7 @@ fun DiscoverScreen(
                                         onSongClick()
                                     }
                                 },
-                                onAddClick = { showAddSongDialog = true },
-                                onSyncClick = if (canSync) { { selectedPlaylist?.let { viewModel.syncCollection(it) } } } else null,
-                                lastSyncedAt = selectedPlaylist?.lastSyncedAt,
-                                isSyncing = isSyncing
+                                onAddClick = { showAddSongDialog = true }
                             )
 
                             Row(

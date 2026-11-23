@@ -10,7 +10,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -53,9 +52,6 @@ fun ImmersivePlaylistHeader(
     onPlayAllClick: () -> Unit,
     onShuffleClick: () -> Unit,
     onAddClick: (() -> Unit)? = null,
-    onSyncClick: (() -> Unit)? = null,
-    lastSyncedAt: Long? = null,
-    isSyncing: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val formattedDuration = remember(totalDurationMs) { formatTotalDuration(totalDurationMs) }
@@ -191,22 +187,6 @@ fun ImmersivePlaylistHeader(
                 )
             )
         }
-        
-        if (onSyncClick != null) {
-            Spacer(modifier = Modifier.height(6.dp))
-            val format = remember { java.text.SimpleDateFormat("MMM dd, HH:mm", java.util.Locale.getDefault()) }
-            val syncText = if (lastSyncedAt != null) {
-                "Last synced: ${format.format(java.util.Date(lastSyncedAt))}"
-            } else {
-                "Not synced yet"
-            }
-            Text(
-                text = syncText,
-                style = MaterialTheme.typography.labelSmall.copy(
-                    color = Color.White.copy(alpha = 0.6f)
-                )
-            )
-        }
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -308,34 +288,6 @@ fun ImmersivePlaylistHeader(
                         tint = Color.White,
                         modifier = Modifier.size(22.dp)
                     )
-                }
-            }
-            
-            // Perfect Circle "Sync" Button
-            if (onSyncClick != null) {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.10f))
-                        .border(1.5.dp, Color.White.copy(alpha = 0.20f), CircleShape)
-                        .clickable(enabled = !isSyncing, onClick = onSyncClick),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isSyncing) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(22.dp),
-                            color = Color.White,
-                            strokeWidth = 2.dp
-                        )
-                    } else {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Sync Playlist",
-                            tint = Color.White,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
                 }
             }
         }
