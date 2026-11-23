@@ -65,7 +65,7 @@ class MusicService : MediaSessionService() {
     private var mediaSession: MediaSession? = null
     private lateinit var player: ExoPlayer
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
-    private var idleJob: Job? = null
+
     
     private lateinit var httpDataSourceFactory: OkHttpDataSource.Factory
     private var currentQueue: List<Song> = emptyList()
@@ -307,16 +307,6 @@ class MusicService : MediaSessionService() {
             
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 PulseLogger.log("Playback: ${if(isPlaying) "Playing" else "Paused"}")
-                idleJob?.cancel()
-                if (!isPlaying) {
-                    idleJob = serviceScope.launch {
-                        delay(30 * 1000L) // 30 seconds idle timeout when paused
-                        if (!player.isPlaying && player.playbackState != Player.STATE_BUFFERING) {
-                            PulseLogger.log("Idle for 30 seconds. Stopping service.")
-                            stopSelf()
-                        }
-                    }
-                }
             }
 
             override fun onPlayerError(error: PlaybackException) {
@@ -1041,6 +1031,7 @@ class MusicService : MediaSessionService() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        startImmediateForegroundNotification()
         return super.onStartCommand(intent, flags, startId)
     }
 
