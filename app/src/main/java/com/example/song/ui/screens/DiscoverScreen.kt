@@ -1151,16 +1151,56 @@ fun DiscoverScreen(
         }
 
         AnimatedVisibility(visible = isSelectionMode, enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut(), modifier = Modifier.zIndex(10f)) {
-            Surface(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), shape = RoundedCornerShape(24.dp), color = Color.White.copy(alpha = 0.85f), tonalElevation = 8.dp, border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))) {
+            Surface(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), shape = RoundedCornerShape(24.dp), color = Color(0xFF181818).copy(alpha = 0.96f), border = BorderStroke(1.5.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.08f))))) {
                 Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { viewModel.toggleSelectionMode(false) }) { Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color(0xFF424242)) }
+                    IconButton(onClick = { viewModel.toggleSelectionMode(false) }) { Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White) }
                     Spacer(modifier = Modifier.width(16.dp))
-                    Text(text = "${selectedStreamingIds.size} Selected", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color(0xFF333333)), modifier = Modifier.weight(1f))
-                    IconButton(onClick = { viewModel.addSelectedToQueue(playNext = false) }) { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Add Selected to Queue", tint = Color(0xFF4CAF50)) }
-                    IconButton(onClick = { val count = selectedStreamingIds.size; viewModel.deleteSelectedItems(); scope.launch { snackbarHostState.showSnackbar("Deleted $count items") } }) { Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color.Red) }
+                    Text(text = "${selectedStreamingIds.size} Selected", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White), modifier = Modifier.weight(1f))
+                    IconButton(onClick = { viewModel.addSelectedToQueue(playNext = false) }) { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Add Selected to Queue", tint = Color(0xFF00E676)) }
+                    IconButton(onClick = { viewModel.deleteSelectedItemsWithUndo(selectedPlaylist?.title) }) { Icon(Icons.Default.Delete, contentDescription = "Delete Selected", tint = Color(0xFFFF5252)) }
                 }
             }
         }
+        
+        val undoBanner by viewModel.undoBanner.collectAsState()
+        AnimatedVisibility(
+            visible = undoBanner != null,
+            enter = slideInVertically { it / 2 } + fadeIn(),
+            exit = slideOutVertically { it / 2 } + fadeOut(),
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .zIndex(10f)
+                .padding(horizontal = 16.dp)
+                .padding(bottom = if (currentPlayingSong != null) 156.dp else 92.dp)
+                .navigationBarsPadding()
+        ) {
+            undoBanner?.let { banner ->
+                val progress = remember { Animatable(1f) }
+                LaunchedEffect(banner.id) {
+                    progress.animateTo(0f, tween(4000, easing = LinearEasing))
+                    viewModel.dismissUndoDelete()
+                }
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color(0xFF181818).copy(alpha = 0.96f),
+                    border = BorderStroke(1.5.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.08f)))),
+                    modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp))
+                ) {
+                    Column {
+                        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Text(banner.message, color = Color.White, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                            TextButton(onClick = { viewModel.confirmUndoDelete() }) {
+                                Text("Undo", color = Color(0xFF00E676), fontWeight = FontWeight.Bold)
+                            }
+                        }
+                        Box(modifier = Modifier.fillMaxWidth().height(3.dp).background(Color.White.copy(alpha = 0.12f))) {
+                            Box(modifier = Modifier.fillMaxHeight().fillMaxWidth(progress.value).background(Color(0xFF00E676)))
+                        }
+                    }
+                }
+            }
+        }
+        
         if (showAddSongDialog) {
             val currentPlaylistItems by viewModel.getItemsForStreamingPlaylist(selectedPlaylist?.youtubeUrl ?: "").collectAsState(initial = emptyList())
             val availableTracksToAdd = remember(singleSongs, selectedPlaylist, currentPlaylistItems) {

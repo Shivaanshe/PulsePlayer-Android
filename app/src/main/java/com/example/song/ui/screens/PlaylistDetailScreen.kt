@@ -360,13 +360,18 @@ fun PlaylistDetailScreen(
 
         // Selection Action Bar
         AnimatedVisibility(visible = isSelectionMode, enter = slideInVertically { -it } + fadeIn(), exit = slideOutVertically { -it } + fadeOut(), modifier = Modifier.zIndex(10f)) {
-            Surface(modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), shape = RoundedCornerShape(24.dp), color = Color.White.copy(alpha = 0.85f), tonalElevation = 8.dp, border = BorderStroke(1.dp, Color.White.copy(alpha = 0.5f))) {
+            Surface(
+                modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(12.dp), 
+                shape = RoundedCornerShape(24.dp), 
+                color = Color(0xFF181818).copy(alpha = 0.96f), 
+                border = BorderStroke(1.5.dp, Brush.linearGradient(listOf(Color.White.copy(alpha = 0.35f), Color.White.copy(alpha = 0.08f))))
+            ) {
                 Row(modifier = Modifier.fillMaxWidth().height(64.dp).padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(onClick = { viewModel.toggleSelectionMode(false) }) { Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color(0xFF424242)) }
+                    IconButton(onClick = { viewModel.toggleSelectionMode(false) }) { Icon(Icons.Default.Close, contentDescription = "Cancel", tint = Color.White) }
                     Spacer(modifier = Modifier.width(16.dp))
-                    Text(text = "${selectedSongIds.size} Selected", style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold, color = Color(0xFF333333)), modifier = Modifier.weight(1f))
-                    IconButton(onClick = { viewModel.addSelectedToQueue(playNext = false) }) { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Add Selected to Queue", tint = Color(0xFF4CAF50)) }
-                    IconButton(onClick = { viewModel.removeSelectedFromPlaylist(playlistId) }) { Icon(Icons.Default.Delete, contentDescription = "Remove Selected", tint = Color.Red) }
+                    Text(text = "${selectedSongIds.size} Selected", style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold, color = Color.White), modifier = Modifier.weight(1f))
+                    IconButton(onClick = { viewModel.addSelectedToQueue(playNext = false) }) { Icon(Icons.AutoMirrored.Filled.QueueMusic, contentDescription = "Add Selected to Queue", tint = Color(0xFF00E676)) }
+                    IconButton(onClick = { viewModel.removeSelectedFromPlaylist(playlistId) }) { Icon(Icons.Default.Delete, contentDescription = "Remove Selected", tint = Color(0xFFFF5252)) }
                 }
             }
         }

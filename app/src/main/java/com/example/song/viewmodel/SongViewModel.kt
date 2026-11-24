@@ -1387,6 +1387,72 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    data class UndoDeleteBanner(
+        val id: Long,
+        val message: String,
+        val songs: List<Song>,
+        val streamingItems: List<com.example.song.data.model.StreamingItem>
+    )
+    
+    private val _undoBanner = MutableStateFlow<UndoDeleteBanner?>(null)
+    val undoBanner = _undoBanner.asStateFlow()
+
+    fun deleteSelectedItemsWithUndo(
+        sourceContext: String? = null
+    ) {
+        viewModelScope.launch {
+            val songIds = _selectedSongIds.value.toList()
+            val streamingIds = _selectedStreamingIds.value.toList()
+            val count = songIds.size + streamingIds.size
+            if (count == 0) return@launch
+
+            val songsToRestore = repository.getSongsByIdsSync(songIds)
+            val streamingToRestore = repository.getStreamingItemsByIdsSync(streamingIds)
+
+            songIds.forEach { id ->
+                repository.deleteSong(id)
+                if (_currentPlayingSong.value?.id == id) {
+                    mediaController?.stop()
+                    _currentPlayingSong.value = null
+                }
+            }
+
+            streamingIds.forEach { id ->
+                repository.deleteStreamingItemById(id)
+            }
+
+            toggleSelectionMode(false)
+            
+            val msg = if (sourceContext != null && sourceContext != "Library") {
+                "Removed $count ${if (count == 1) "track" else "tracks"} from $sourceContext"
+            } else {
+                "Deleted $count ${if (count == 1) "track" else "tracks"} from Library"
+            }
+            
+            _undoBanner.value = UndoDeleteBanner(
+                id = System.currentTimeMillis(),
+                message = msg,
+                songs = songsToRestore,
+                streamingItems = streamingToRestore
+            )
+        }
+    }
+    
+    fun confirmUndoDelete() {
+        val banner = _undoBanner.value ?: return
+        viewModelScope.launch {
+            banner.songs.forEach { repository.insertSong(it) }
+            if (banner.streamingItems.isNotEmpty()) {
+                repository.insertStreamingItems(banner.streamingItems)
+            }
+            _undoBanner.value = null
+        }
+    }
+    
+    fun dismissUndoDelete() {
+        _undoBanner.value = null
+    }
+
     fun deleteSelectedItems() {
         viewModelScope.launch {
             val songIds = _selectedSongIds.value.toList()
