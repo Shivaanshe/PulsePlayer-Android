@@ -72,6 +72,9 @@ interface StreamingDao {
     @Query("SELECT * FROM streaming_items WHERE parentPlaylistUrl IS NULL AND isPlaylist = 0")
     suspend fun getAllTopLevelSingleSongsSync(): List<StreamingItem>
 
+    @Query("SELECT * FROM streaming_items WHERE youtubeUrl IN (:urls) AND parentPlaylistUrl IS NULL ORDER BY id DESC")
+    suspend fun getItemsByUrlsSync(urls: List<String>): List<StreamingItem>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSyncTombstone(tombstone: com.example.song.data.model.SyncTombstone)
 

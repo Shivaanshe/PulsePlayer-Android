@@ -766,6 +766,8 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     repository.insertStreamingItems(items)
                 }
             } else {
+                val playlistPlaceholderThumb = items.firstOrNull { it.isPlaylist }?.thumbnailUrl
+                
                 val filteredItems = items.filter { !it.isPlaylist }.map { 
                     it.copy(parentPlaylistUrl = null) 
                 }
@@ -773,7 +775,7 @@ class SongViewModel(application: Application) : AndroidViewModel(application) {
                     repository.getTopLevelSingleSong(item.youtubeUrl, item.title, item.artist) == null
                 }
                 if (nonDuplicates.isNotEmpty()) {
-                    repository.insertStreamingItems(nonDuplicates)
+                    repository.insertStreamingItems(nonDuplicates, placeholderThumb = playlistPlaceholderThumb)
                 } else {
                     val firstItem = filteredItems.firstOrNull()
                     if (firstItem != null) {

@@ -384,7 +384,7 @@ class SongRepository(
         return@withContext tracksToInsert.size
     }
 
-    suspend fun insertStreamingItems(items: List<StreamingItem>) {
+    suspend fun insertStreamingItems(items: List<StreamingItem>, placeholderThumb: String? = null) {
         streamingDao.insertItems(items)
         items.forEach { item ->
             if (item.parentPlaylistUrl != null) {
@@ -414,19 +414,50 @@ class SongRepository(
             } else {
                 android.util.Log.d("ArtworkBackfill", "[SKIP] Import complete — all tracks already have artwork")
             }
+        } else if (playlistHeader == null && items.isNotEmpty()) {
+            val standaloneSpotifyTracks = items.filter { 
+                it.parentPlaylistUrl == null && 
+                it.youtubeUrl.contains("ytsearch1:") && // Wait, spotify resolver returns ytsearch1, but let's check for missing thumb
+                (it.thumbnailUrl.isNullOrEmpty() || it.thumbnailUrl == placeholderThumb) 
+            }
+            if (standaloneSpotifyTracks.isNotEmpty()) {
+                val trackUrls = standaloneSpotifyTracks.map { it.youtubeUrl }.toTypedArray()
+                val request = androidx.work.OneTimeWorkRequestBuilder<com.example.song.worker.ArtworkBackfillWorker>()
+                    .setInputData(androidx.work.workDataOf(
+                        "trackUrls" to trackUrls,
+                        "placeholderThumb" to placeholderThumb
+                    ))
+                    .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(androidx.work.NetworkType.CONNECTED).build())
+                    .build()
+                androidx.work.WorkManager.getInstance(com.example.song.SongApplication.getInstance()).enqueueUniqueWork(
+                    "artwork_backfill_individual_${System.currentTimeMillis()}",
+                    androidx.work.ExistingWorkPolicy.KEEP,
+                    request
+                )
+            }
         }
+    }
+    
+    suspend fun backfillArtworkForUrls(urls: List<String>, placeholderThumb: String?) {
+        val tracks = streamingDao.getItemsByUrlsSync(urls)
+        val tracksToBackfill = tracks.filter { it.thumbnailUrl.isNullOrEmpty() || it.thumbnailUrl == placeholderThumb }
+        executeBackfill(tracksToBackfill, "Individual Tracks", tracks.size)
     }
     
     suspend fun backfillMissingArtwork(playlistUrl: String, placeholderThumb: String?) {
         val tracks = streamingDao.getItemsForPlaylistSync(playlistUrl)
         val tracksToBackfill = tracks.filter { it.thumbnailUrl.isNullOrEmpty() || it.thumbnailUrl == placeholderThumb }
+        executeBackfill(tracksToBackfill, "playlist=$playlistUrl", tracks.size)
+    }
+
+    private suspend fun executeBackfill(tracksToBackfill: List<StreamingItem>, logLabel: String, totalSize: Int) {
         
         if (tracksToBackfill.isEmpty()) {
             android.util.Log.d("ArtworkBackfill", "[SKIP] All tracks already have artwork")
             return
         }
         
-        val startMsg = "[START] playlist=$playlistUrl | total=${tracks.size} | toBackfill=${tracksToBackfill.size}"
+        val startMsg = "[START] $logLabel | total=$totalSize | toBackfill=${tracksToBackfill.size}"
         android.util.Log.d("ArtworkBackfill", startMsg)
         com.example.song.util.PulseLogger.log(startMsg)
         
@@ -719,7 +750,10 @@ class SongRepository(
         if (newThumbUrl.isBlank()) return@withContext false
         if (item.thumbnailUrl == newThumbUrl) return@withContext false
 
-        val isPlaceholder = item.thumbnailUrl.isNullOrEmpty() || (item.parentPlaylistUrl != null && item.thumbnailUrl == streamingDao.getPlaylistByUrl(item.parentPlaylistUrl)?.thumbnailUrl)
+        val currentThumb = item.thumbnailUrl
+        val isPlaceholder = currentThumb.isNullOrEmpty() || 
+            (item.parentPlaylistUrl != null && currentThumb == streamingDao.getPlaylistByUrl(item.parentPlaylistUrl)?.thumbnailUrl) ||
+            (item.parentPlaylistUrl == null && !currentThumb.contains("mzstatic.com") && !currentThumb.contains("ytimg.com") && !currentThumb.contains("googleusercontent.com"))
         
         if (!isPlaceholder) {
             android.util.Log.d("ArtworkBackfill", "[YTDLP-SKIP] \"${item.title}\" already has artwork, keeping existing cover")
